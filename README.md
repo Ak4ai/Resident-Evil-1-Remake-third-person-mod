@@ -6,6 +6,29 @@ A mod for the PC version of **Resident Evil HD Remaster** (Steam, 2015) that rep
 
 > **Status: work in progress.** The first room being rebuilt is the **dining hall (room 105)**. See the [roadmap](ROADMAP.md).
 
+## Gallery
+
+| | |
+|---|---|
+| ![Free third-person camera in the dining hall](docs/images/third_person_camera.jpg)<br>**Free third-person camera** in the rebuilt dining hall | ![Moonbeam lighting Jill](docs/images/moonbeam_on_jill.jpg)<br>**Moonbeam through the window** lighting the character |
+| ![Rebuilt dining hall](docs/images/dining_hall_rebuilt.jpg)<br>**Room 105 rebuilt in 3D** with baked lighting | ![Candles and moonlight](docs/images/candles_and_moonlight.jpg)<br>**Candles and moonlight**, before / after grading |
+
+**Thunder flash** – before / after:
+![Thunder flash before and after](docs/images/thunder_flash_before_after.jpg)
+
+**Character lit by the room** (ambient probe grid) – comparison:
+![Character lit by the room](docs/images/character_room_lighting.jpg)
+
+## Progress at a glance
+
+| Area | Done |
+|---|---|
+| **Third-person gameplay** | Free follow camera with right-stick orbit · camera kept out of walls · over-the-shoulder aim mode with reticle · character turns to face the aim · player found in memory automatically · works with controller and keyboard |
+| **3D modelling (room 105)** | Full dining hall rebuilt and checked against the game's backgrounds and depth maps · pilasters, cornices, niches, ceiling, wall panels, doors, fireplace, furniture and props · window landscape · z-fighting and hidden-geometry checker |
+| **Lighting & effects** | Lightmaps baked in Blender/Cycles in 4 animated layers · clean lightmap UV (no black lines on corners) · volumetric moonbeams · thunder flash · emissive bloom, halos, grain, colour grading · character lit by an 800-probe grid |
+
+Full list: [ROADMAP.md](ROADMAP.md).
+
 ## What it does
 
 - **Free third-person camera** that follows Jill/Chris, orbits with the right stick, and has an over-the-shoulder aim mode with a reticle.

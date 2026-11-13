@@ -15,3 +15,5 @@ blend/
 lm_layers/
 preview/
 out/
+!docs/images/*.jpg
+!LICENSE

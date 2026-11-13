@@ -6,6 +6,29 @@ Mod para a versão de PC do **Resident Evil HD Remaster** (Steam, 2015) que troc
 
 > **Situação: em desenvolvimento.** A primeira sala reconstruída é a **sala de jantar (sala 105)**. Veja o [mapa do projeto](ROADMAP.pt-BR.md).
 
+## Galeria
+
+| | |
+|---|---|
+| ![Câmera livre em terceira pessoa na sala de jantar](docs/images/third_person_camera.jpg)<br>**Câmera livre em terceira pessoa** na sala de jantar reconstruída | ![Feixe de luar na Jill](docs/images/moonbeam_on_jill.jpg)<br>**Feixe de luar pela janela** iluminando a personagem |
+| ![Sala de jantar reconstruída](docs/images/dining_hall_rebuilt.jpg)<br>**Sala 105 reconstruída em 3D** com luz assada | ![Velas e luar](docs/images/candles_and_moonlight.jpg)<br>**Velas e luar**, antes / depois da correção de cor |
+
+**Clarão do trovão** – antes / depois:
+![Clarão do trovão antes e depois](docs/images/thunder_flash_before_after.jpg)
+
+**Personagem iluminada pela sala** (grade de sondas) – comparação:
+![Personagem iluminada pela sala](docs/images/character_room_lighting.jpg)
+
+## Resumo do que já está feito
+
+| Área | Feito |
+|---|---|
+| **Gameplay em terceira pessoa** | Câmera livre que segue e gira no analógico direito · câmera não atravessa paredes · mira por cima do ombro com retícula · personagem vira para onde mira · personagem achada na memória sozinha · funciona no controle e no teclado |
+| **Modelagem 3D (sala 105)** | Sala de jantar inteira reconstruída e conferida com os fundos e mapas de profundidade do jogo · pilastras, cornijas, nichos, teto, painéis, portas, lareira, móveis e objetos · paisagem nas janelas · verificador de z-fighting e geometria escondida |
+| **Luz e efeitos** | Lightmaps assados no Blender/Cycles em 4 camadas animadas · UV do lightmap limpo (sem linhas pretas nas quinas) · feixes volumétricos de luar · clarão do trovão · bloom nas fontes de luz, halos, granulado, correção de cor · personagem iluminada por grade de 800 sondas |
+
+Lista completa: [ROADMAP.pt-BR.md](ROADMAP.pt-BR.md).
+
 ## O que faz
 
 - **Câmera livre em terceira pessoa**: segue a Jill/Chris, gira com o analógico direito e tem modo de mira por cima do ombro, com retícula.

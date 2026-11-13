@@ -2310,6 +2310,14 @@ __declspec(dllexport) void mod_present(IDirect3DDevice9 *dev)
     int k, flag;
     char p[MAX_PATH];
     g_frames++;
+    if (g_frames % 60 == 1) { /* window opened off-screen (old dual-monitor position) -> bring it back to the primary monitor */
+        D3DDEVICE_CREATION_PARAMETERS cp; RECT wr;
+        if (SUCCEEDED(IDirect3DDevice9_GetCreationParameters(dev, &cp)) && cp.hFocusWindow && !IsIconic(cp.hFocusWindow) &&
+            GetWindowRect(cp.hFocusWindow, &wr) && !MonitorFromWindow(cp.hFocusWindow, MONITOR_DEFAULTTONULL)) {
+            SetWindowPos(cp.hFocusWindow, NULL, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            M_("window was off-screen at %ld,%ld -> moved to 0,0\n", wr.left, wr.top);
+        }
+    }
     if (!g_inited) {
         if (g_frames < 600) return; /* stay out of the way while the game boots */
         late_init(dev);

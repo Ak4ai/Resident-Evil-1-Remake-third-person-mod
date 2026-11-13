@@ -8,24 +8,48 @@ Mod para a versão de PC do **Resident Evil HD Remaster** (Steam, 2015) que troc
 
 ## Galeria
 
+**Fundo pré-renderizado original (esquerda) x nossa reconstrução 3D (direita), mesma câmera** – render da sala reconstruída no Blender:
+![Fundo original x reconstrução 3D, mesma câmera](docs/images/original_vs_rebuild.jpg)
+
+**A mesma sala de ângulos que o jogo original nunca mostrou** – renders no Blender:
+![Sala reconstruída de três ângulos livres](docs/images/free_angles.jpg)
+
+**No jogo, com o mod:**
+
 | | |
 |---|---|
-| ![Câmera livre em terceira pessoa na sala de jantar](docs/images/third_person_camera.jpg)<br>**Câmera livre em terceira pessoa** na sala de jantar reconstruída | ![Feixe de luar na Jill](docs/images/moonbeam_on_jill.jpg)<br>**Feixe de luar pela janela** iluminando a personagem |
-| ![Sala de jantar reconstruída](docs/images/dining_hall_rebuilt.jpg)<br>**Sala 105 reconstruída em 3D** com luz assada | ![Velas e luar](docs/images/candles_and_moonlight.jpg)<br>**Velas e luar**, antes / depois da correção de cor |
+| ![Câmera livre no jogo](docs/images/third_person_camera.jpg)<br>Câmera livre em terceira pessoa na sala reconstruída | ![Feixe de luar na Jill no jogo](docs/images/moonbeam_on_jill.jpg)<br>Feixe de luar pela janela iluminando a Jill |
 
-**Clarão do trovão** – antes / depois:
-![Clarão do trovão antes e depois](docs/images/thunder_flash_before_after.jpg)
+![Personagem iluminada pela sala no jogo](docs/images/character_room_lighting.jpg)
+A Jill recebendo a luz da sala (grade de sondas), no jogo.
 
-**Personagem iluminada pela sala** (grade de sondas) – comparação:
-![Personagem iluminada pela sala](docs/images/character_room_lighting.jpg)
+## Progresso
 
-## Resumo do que já está feito
+Estimativas, atualizadas à mão.
 
-| Área | Feito |
+| Área | Progresso | |
+|---|---|---|
+| **Salas reconstruídas** | `█░░░░░░░░░░░░░░░░░░░` | **1** de mais de 100 (sala de jantar) |
+| Sala 105 – modelagem 3D | `███████████████████░` 95% | sala inteira, conferida com os fundos do jogo |
+| Sala 105 – iluminação | `████████████░░░░░░░░` 60% | lightmaps prontos; faltam relâmpago/luar nas janelas e ajuste por câmera |
+| **Gameplay em terceira pessoa** | `████████████░░░░░░░░` 60% | 6 de 10 mecânicas |
+| Efeitos | `█████████████████░░░` 85% | falta só a sombra da personagem |
+| Ferramentas e pipeline | `█████████████░░░░░░░` 65% | faltam pacote de release e caminhos configuráveis |
+
+**Mecânicas de terceira pessoa**
+
+| Mecânica | |
 |---|---|
-| **Gameplay em terceira pessoa** | Câmera livre que segue e gira no analógico direito · câmera não atravessa paredes · mira por cima do ombro com retícula · personagem vira para onde mira · personagem achada na memória sozinha · funciona no controle e no teclado |
-| **Modelagem 3D (sala 105)** | Sala de jantar inteira reconstruída e conferida com os fundos e mapas de profundidade do jogo · pilastras, cornijas, nichos, teto, painéis, portas, lareira, móveis e objetos · paisagem nas janelas · verificador de z-fighting e geometria escondida |
-| **Luz e efeitos** | Lightmaps assados no Blender/Cycles em 4 camadas animadas · UV do lightmap limpo (sem linhas pretas nas quinas) · feixes volumétricos de luar · clarão do trovão · bloom nas fontes de luz, halos, granulado, correção de cor · personagem iluminada por grade de 800 sondas |
+| Câmera livre que segue, giro no analógico direito | ✅ |
+| Câmera não atravessa paredes | ✅ |
+| Mira por cima do ombro com retícula | ✅ |
+| Personagem vira para onde mira | ✅ |
+| Personagem achada na memória sozinha | ✅ |
+| Controle e teclado | ✅ |
+| Câmera passando por portas / troca de sala | ⬜ |
+| Cenas e eventos roteirizados | ⬜ |
+| Mirar nos inimigos (travar alvo) | ⬜ |
+| Testado com o Chris | ⬜ |
 
 Lista completa: [ROADMAP.pt-BR.md](ROADMAP.pt-BR.md).
 

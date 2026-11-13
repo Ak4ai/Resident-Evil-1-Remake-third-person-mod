@@ -8,24 +8,48 @@ A mod for the PC version of **Resident Evil HD Remaster** (Steam, 2015) that rep
 
 ## Gallery
 
+**Original pre-rendered background (left) vs. our 3D rebuild (right), same camera** – Blender render of the rebuilt dining hall:
+![Original background vs 3D rebuild, same camera](docs/images/original_vs_rebuild.jpg)
+
+**The same rebuilt room from new angles** the original game never showed – Blender renders:
+![Rebuilt dining hall from three free angles](docs/images/free_angles.jpg)
+
+**In game, with the mod:**
+
 | | |
 |---|---|
-| ![Free third-person camera in the dining hall](docs/images/third_person_camera.jpg)<br>**Free third-person camera** in the rebuilt dining hall | ![Moonbeam lighting Jill](docs/images/moonbeam_on_jill.jpg)<br>**Moonbeam through the window** lighting the character |
-| ![Rebuilt dining hall](docs/images/dining_hall_rebuilt.jpg)<br>**Room 105 rebuilt in 3D** with baked lighting | ![Candles and moonlight](docs/images/candles_and_moonlight.jpg)<br>**Candles and moonlight**, before / after grading |
+| ![Free third-person camera in game](docs/images/third_person_camera.jpg)<br>Free third-person camera in the rebuilt room | ![Moonbeam lighting Jill in game](docs/images/moonbeam_on_jill.jpg)<br>Moonbeam through the window lighting Jill |
 
-**Thunder flash** – before / after:
-![Thunder flash before and after](docs/images/thunder_flash_before_after.jpg)
+![Character lit by the room in game](docs/images/character_room_lighting.jpg)
+Jill picking up the room's light (ambient probe grid), in game.
 
-**Character lit by the room** (ambient probe grid) – comparison:
-![Character lit by the room](docs/images/character_room_lighting.jpg)
+## Progress
 
-## Progress at a glance
+Estimates, updated by hand.
 
-| Area | Done |
+| Area | Progress | |
+|---|---|---|
+| **Rooms rebuilt** | `█░░░░░░░░░░░░░░░░░░░` | **1** of 100+ (dining hall) |
+| Room 105 – 3D modelling | `███████████████████░` 95% | full room, checked against the game's backgrounds |
+| Room 105 – lighting | `████████████░░░░░░░░` 60% | lightmaps done; window lightning/moonlight and per-camera matching left |
+| **Third-person gameplay** | `████████████░░░░░░░░` 60% | 6 of 10 mechanics |
+| Effects | `█████████████████░░░` 85% | only character shadows left |
+| Tools & pipeline | `█████████████░░░░░░░` 65% | release package and configurable paths left |
+
+**Third-person mechanics**
+
+| Mechanic | |
 |---|---|
-| **Third-person gameplay** | Free follow camera with right-stick orbit · camera kept out of walls · over-the-shoulder aim mode with reticle · character turns to face the aim · player found in memory automatically · works with controller and keyboard |
-| **3D modelling (room 105)** | Full dining hall rebuilt and checked against the game's backgrounds and depth maps · pilasters, cornices, niches, ceiling, wall panels, doors, fireplace, furniture and props · window landscape · z-fighting and hidden-geometry checker |
-| **Lighting & effects** | Lightmaps baked in Blender/Cycles in 4 animated layers · clean lightmap UV (no black lines on corners) · volumetric moonbeams · thunder flash · emissive bloom, halos, grain, colour grading · character lit by an 800-probe grid |
+| Free follow camera, right-stick orbit | ✅ |
+| Camera kept out of walls | ✅ |
+| Over-the-shoulder aim with reticle | ✅ |
+| Character turns to face the aim | ✅ |
+| Player found in memory automatically | ✅ |
+| Controller and keyboard | ✅ |
+| Camera through doors / room transitions | ⬜ |
+| Cutscenes and scripted events | ⬜ |
+| Aim at enemies (targeting) | ⬜ |
+| Tested with Chris | ⬜ |
 
 Full list: [ROADMAP.md](ROADMAP.md).
 

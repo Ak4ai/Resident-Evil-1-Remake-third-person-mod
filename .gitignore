@@ -1,0 +1,17 @@
+# Whitelist: only original code and docs. Never commit game assets, .blend files, bakes, captures or logs.
+*
+!*/
+!.gitignore
+!*.md
+!build.ps1
+!run_overnight.bat
+!mod/mod.c
+!d3d9proxy/d3d9.c
+!ext/*.py
+# internal hand-off notes
+HANDOFF_*.md
+# folders that only hold generated data
+blend/
+lm_layers/
+preview/
+out/

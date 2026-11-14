@@ -194,6 +194,7 @@ static IDirect3DPixelShader9 *g_psbr, *g_psbh, *g_psbv, *g_psba;
 static IDirect3DVertexDeclaration9 *g_declq;
 static IDirect3DTexture9 *g_blT[2]; static IDirect3DSurface9 *g_blS[2];
 static int g_hideFx = 1; /* ctl: hidefx 0/1 */
+static int g_camSeenF = -100; /* last frame the game set its ROOM camera (not set while the inventory/menus are up) */
 /* ---- cutscenes / NPC talk: hand the screen back to the game's fixed camera ----
    The game runs room scripts in an array of task objects (vtable 0x00C963C8, stride 0x6D0, ~137 slots, found with Cheat
    Engine). Byte +0x160 = slot running; dword +0x1C = kind: 6 = room background script, 2 = event (cutscene / dialogue).
@@ -2050,7 +2051,7 @@ HOOKFN(HRESULT, SetVertexShaderConstantF, UINT start, const float *data, UINT co
             M_("SWITCH f=%d game VP trans %.1f %.1f %.1f (was %.1f %.1f %.1f)\n", g_frames, data[12], data[13], data[14], g_orig[12], g_orig[13], g_orig[14]);
             g_lastSw = g_frames; g_swPend = g_swRel;
         }
-        g_cVPok++;
+        g_cVPok++; g_camSeenF = g_frames;
         memcpy(g_orig, data, sizeof g_orig);
         g_haveOrig = 1;
         if (g_on && g_haveCam && !(g_bis & 2)) return o_SetVertexShaderConstantF(d, start, g_M, count);
@@ -2423,7 +2424,7 @@ HOOKFN(HRESULT, DrawIndexedPrimitive, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT 
        with our 3D room on they float where the old background had them, so drop them (ctl: hidefx 0 to keep) */
     /* hidefx 1 = only ADDITIVE strips (flames/glows: alpha blend on, dest blend ONE); menus and the inventory use normal
        alpha blending and stay visible. hidefx 2 = every strip (old rule, also hid the inventory -> black screen). */
-    if (g_hideFx && g_on && g_haveCam && !g_inRender && t == D3DPT_TRIANGLESTRIP) {
+    if (g_hideFx && g_on && g_haveCam && !g_inRender && t == D3DPT_TRIANGLESTRIP && g_frames - g_camSeenF <= 2) { /* only while the room is on screen */
         DWORD ab = 0, sb = 0, db = 0, ze = 0;
         IDirect3DDevice9_GetRenderState(d, D3DRS_ALPHABLENDENABLE, &ab); IDirect3DDevice9_GetRenderState(d, D3DRS_SRCBLEND, &sb);
         IDirect3DDevice9_GetRenderState(d, D3DRS_DESTBLEND, &db); IDirect3DDevice9_GetRenderState(d, D3DRS_ZENABLE, &ze);

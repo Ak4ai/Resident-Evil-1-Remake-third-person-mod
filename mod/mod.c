@@ -188,6 +188,9 @@ static IDirect3DPixelShader9 *g_psbr, *g_psbh, *g_psbv, *g_psba;
 static IDirect3DVertexDeclaration9 *g_declq;
 static IDirect3DTexture9 *g_blT[2]; static IDirect3DSurface9 *g_blS[2];
 static int g_hideFx = 1; /* ctl: hidefx 0/1 */
+static int g_wepLog; /* ctl: weplog 1 = log meshes drawn while LT is held */
+static int g_knifeSeen = -1000; /* last frame the knife mesh was drawn (knife in hand: game draws nv=945/pc=664 and nv=1696/pc=352) */
+static int g_knifeOff = 1;      /* ctl: knifeoff 0 = keep the gun arm pose even with the knife */
 static float g_bloomTh = 0.35f, g_bloomStr = 0.6f; /* ctl: bloom <strength> (0 = off), bloomlim <threshold> */
 static float g_pre1[6] = { -75.8f, 208.8f, 46.7f, 2.54f, -0.16f, 55.0f }; /* ctl preset1: central room camera (game units) */
 static int g_shots, g_swId, g_shotK;
@@ -1387,6 +1390,8 @@ static void read_ctl(void)
         else if (sscanf(line, "lmw3 %f", &a) == 1) g_lmW[3] = a;
         else if (sscanf(line, "bloomlim %f", &a) == 1) g_bloomTh = a;
         else if (sscanf(line, "hidefx %f", &a) == 1) g_hideFx = (int)a;
+        else if (sscanf(line, "weplog %f", &a) == 1) g_wepLog = (int)a;
+        else if (sscanf(line, "knifeoff %f", &a) == 1) g_knifeOff = (int)a;
         else if (sscanf(line, "bloom %f", &a) == 1) g_bloomStr = a;
         else if (sscanf(line, "injraw %f", &a) == 1) g_injRaw = (int)a;
         else if (!strncmp(line, "nodey off", 9)) { g_nodeY = 1e30f; g_nodeOff = 1; }
@@ -1951,6 +1956,7 @@ static void patch_arms(IDirect3DTexture9 *t)
 {
     D3DLOCKED_RECT lr; float *m, R0[9], s0, a = g_armA, tt; int p; static int nerr, nok;
     if (!g_poseOK || !g_armOn) return;
+    if (g_knifeOff && g_frames - g_knifeSeen < 30) return; /* knife: let the game animate the arm (gun pose made the knife float) */
     if (FAILED(IDirect3DTexture9_LockRect(t, 0, &lr, NULL, 0))) { if (nerr++ < 3) M_("patch_arms: LockRect write failed\n"); return; }
     m = (float *)lr.pBits;
     /* only Jill: her root must be where the skeleton centroid was last seen (the same palette texture may carry NPCs) */
@@ -2187,6 +2193,20 @@ HOOKFN(HRESULT, DrawPrimitive, D3DPRIMITIVETYPE t, UINT s, UINT pc)
 HOOKFN(HRESULT, DrawIndexedPrimitive, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT nv, UINT si, UINT pc)
 {
     L("DrawIndexed type=%d numVtx=%u startIdx=%u prims=%u\n", (int)t, nv, si, pc);
+    /* ctl weplog 1: while LT is held, collect the distinct game meshes drawn (vertex count, prims, texture) and log them on
+       release -> compare holding the knife vs a gun to find the knife's mesh signature */
+    if (!g_inRender && ((nv == 945 && pc == 664) || (nv == 1696 && pc == 352))) g_knifeSeen = g_frames;
+    if (g_wepLog && !g_inRender) {
+        static unsigned keys[96]; static int nk, held;
+        if (g_padLT > 60) {
+            IDirect3DBaseTexture9 *tx = NULL; unsigned k; int i;
+            IDirect3DDevice9_GetTexture(d, 0, &tx);
+            k = (nv << 16) ^ (pc << 4) ^ (unsigned)(UINT_PTR)tx; if (tx) IDirect3DBaseTexture9_Release(tx);
+            for (i = 0; i < nk && keys[i] != k; i++) ;
+            if (i == nk && nk < 96) { keys[nk++] = k; M_("WEP f=%d t=%d nv=%u prims=%u tex=%p\n", g_frames, (int)t, nv, pc, (void *)tx); }
+            held = 1;
+        } else if (held) { held = 0; nk = 0; M_("WEP ---- LT solto f=%d\n", g_frames); }
+    }
     if (g_shdDump > 0 && !g_inRender) {
         IDirect3DVertexShader9 *vs = NULL; IDirect3DPixelShader9 *ps = NULL; IDirect3DBaseTexture9 *vt = NULL; int k, seen = 0;
         IDirect3DDevice9_GetVertexShader(d, &vs); IDirect3DDevice9_GetPixelShader(d, &ps); IDirect3DDevice9_GetTexture(d, D3DVERTEXTEXTURESAMPLER1, &vt);
@@ -2200,7 +2220,17 @@ HOOKFN(HRESULT, DrawIndexedPrimitive, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT 
     }
     /* the game's effect particles (candle/fire flames of the pre-rendered room) are indexed strips of 1-2 quads;
        with our 3D room on they float where the old background had them, so drop them (ctl: hidefx 0 to keep) */
-    if (g_hideFx && g_on && g_haveCam && !g_inRender && t == D3DPT_TRIANGLESTRIP) return D3D_OK;
+    /* hidefx 1 = only ADDITIVE strips (flames/glows: alpha blend on, dest blend ONE); menus and the inventory use normal
+       alpha blending and stay visible. hidefx 2 = every strip (old rule, also hid the inventory -> black screen). */
+    if (g_hideFx && g_on && g_haveCam && !g_inRender && t == D3DPT_TRIANGLESTRIP) {
+        DWORD ab = 0, sb = 0, db = 0, ze = 0;
+        IDirect3DDevice9_GetRenderState(d, D3DRS_ALPHABLENDENABLE, &ab); IDirect3DDevice9_GetRenderState(d, D3DRS_SRCBLEND, &sb);
+        IDirect3DDevice9_GetRenderState(d, D3DRS_DESTBLEND, &db); IDirect3DDevice9_GetRenderState(d, D3DRS_ZENABLE, &ze);
+        { static unsigned seen[24]; static int ns; unsigned k = (ab << 24) | (sb << 16) | (db << 8) | (ze & 0xFF) | ((pc > 255 ? 255 : pc) << 0 & 0); int i;
+          for (i = 0; i < ns && seen[i] != k; i++) ;
+          if (i == ns && ns < 24) { seen[ns++] = k; M_("STRIP blend=%lu src=%lu dst=%lu z=%lu prims=%u nv=%u\n", ab, sb, db, ze, pc, nv); } }
+        if (g_hideFx >= 2 || (ab && db == D3DBLEND_ONE)) return D3D_OK;
+    }
     return o_DrawIndexedPrimitive(d, t, bv, mv, nv, si, pc);
 }
 

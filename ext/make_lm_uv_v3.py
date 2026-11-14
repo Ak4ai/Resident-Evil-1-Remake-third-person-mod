@@ -105,13 +105,20 @@ for o in meshes:
     for u in list(od.uv_layers):
         if u.name in ('lm', 'luz'): od.uv_layers.remove(u)
     ol = od.uv_layers.new(name='lm').data
+    # casamento robusto: face pelo centro mais proximo (KD), canto pelo vertice mais proximo da face casada.
+    # Nunca deixa canto no (0,0) padrao: isso criava triangulos gigantes cruzando o atlas que estragavam o bake de outras ilhas.
+    from mathutils.kdtree import KDTree
+    kd = KDTree(len(wd.polygons))
+    for q in wd.polygons: kd.insert(q.center, q.index)
+    kd.balance()
     for p in od.polygons:
         q = idx.get(key(p.center))
-        if q is None or q.loop_total != p.loop_total: miss += 1; continue
-        wpos = {key(wd.vertices[wd.loops[l].vertex_index].co): wl[l].uv.copy() for l in q.loop_indices}
+        if q is None:
+            co, qi, dist = kd.find(p.center); q = wd.polygons[qi]; miss += 1
+        wv = [(wd.vertices[wd.loops[l].vertex_index].co, wl[l].uv.copy()) for l in q.loop_indices]
         for l in p.loop_indices:
-            uv = wpos.get(key(od.vertices[od.loops[l].vertex_index].co))
-            if uv is not None: ol[l].uv = uv
+            pc = od.vertices[od.loops[l].vertex_index].co
+            ol[l].uv = min(wv, key=lambda t: (t[0] - pc).length_squared)[1]
     o.data = od
 print('LMUV3 UV copiado para a malha original; faces sem par (degeneradas):', miss, flush=True)
 bpy.ops.wm.save_as_mainfile(filepath=r'C:\Users\HENRIQUE\Tools\re1mod\blend\r105_lm_v3.blend')

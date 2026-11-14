@@ -8,7 +8,7 @@ echo [1] bake 6 camadas %date% %time% > noite.log
 set LM_SAMPLES=128
 %BL% -b blend\r105_lm_v3.blend --python ext\bake_lm_layers.py -- base lareira velas arandelas relampago luar > logs_noite_bake.txt 2>&1
 findstr /C:"LAYER" logs_noite_bake.txt >> noite.log
-for /f %%n in ('findstr /C:"LAYER" logs_noite_bake.txt ^| %SystemRoot%System32ind.exe /c /v ""') do set NL=%%n
+for /f %%n in ('findstr /C:"LAYER" logs_noite_bake.txt ^| %SystemRoot%\System32\find.exe /c /v ""') do set NL=%%n
 if not "%NL%"=="6" (echo ERRO: bake terminou com %NL% de 6 camadas, nada foi instalado %date% %time% >> noite.log & exit /b 1)
 echo [2] limpeza %date% %time% >> noite.log
 python ext\despeckle_lm.py base lareira velas arandelas relampago luar > logs_noite_post.txt 2>&1

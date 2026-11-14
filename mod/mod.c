@@ -168,7 +168,8 @@ static const char g_hlsl[] =
     "  [loop] for(int k=0;k<64;k++){ if(k>=N) break; float3 S=VCAM.xyz+R*(L*(k+n)/N);\n"
     "    float dust=0.8+0.2*sin(S.x*0.035+VT.x*0.25)*sin(S.y*0.05-VT.x*0.17)*sin(S.z*0.04+VT.x*0.13);\n"
     "    acc+=beam(S)*dust; }\n"
-    "  return float4(VCOL.rgb*(1.0-exp(-(acc/N)*L*VLD.w)),0); }\n";
+    "  return float4(VCOL.rgb*(1.0-exp(-(acc/N)*L*VLD.w)),0); }\n"
+    "float4 psvolc(VOQ i):COLOR0{ float2 o=BL.xy; float3 c=tex2D(S0,i.uv+o*float2(-0.75,-0.75)).rgb+tex2D(S0,i.uv+o*float2(0.75,-0.75)).rgb+tex2D(S0,i.uv+o*float2(-0.75,0.75)).rgb+tex2D(S0,i.uv+o*float2(0.75,0.75)).rgb; return float4(c*0.25,0); }\n";
 
 #define MAXPARTS 64
 typedef struct { IDirect3DVertexBuffer9 *vb; IDirect3DIndexBuffer9 *ib; IDirect3DTexture9 *tex; UINT nv, nf; char name[64]; } Part;
@@ -205,6 +206,7 @@ static float g_bloomTh = 0.35f, g_bloomStr = 0.6f; /* ctl: bloom <strength> (0 =
 static float g_pre1[6] = { -75.8f, 208.8f, 46.7f, 2.54f, -0.16f, 55.0f }; /* ctl preset1: central room camera (game units) */
 static int g_shots, g_swId, g_shotK;
 static float g_vol = 1.0f, g_volDir[3] = { -0.22f, -0.62f, -1.0f }, g_volCol[3] = { 0.50f, 0.62f, 0.85f }; static int g_volSteps = 48; static float g_volFade = 220.0f, g_volSoft = 18.0f; /* ctl volfade, volsoft (cm) */ /* ctl vol, voldir, volcol, volsteps */
+static IDirect3DPixelShader9 *g_psvolc; static IDirect3DTexture9 *g_volT; static IDirect3DSurface9 *g_volS; static int g_volHalf = 1; /* ctl volhalf 0 = old full-res shafts */
 static IDirect3DPixelShader9 *g_psvol, *g_psgrain; static IDirect3DTexture9 *g_postT; static IDirect3DSurface9 *g_postS;
 static float g_thExpo = 1.2f;
 static int g_thArm, g_thLater;
@@ -730,6 +732,7 @@ static int init_renderer(IDirect3DDevice9 *dev, const char *dir)
         if (compile(fn, "psbv", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psbv); b->vt->release(b); }
         if (compile(fn, "psba", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psba); b->vt->release(b); }
         if (compile(fn, "psvol", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psvol); b->vt->release(b); }
+        if (compile(fn, "psvolc", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psvolc); b->vt->release(b); }
         if (compile(fn, "psgrain", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psgrain); b->vt->release(b); }
         IDirect3DDevice9_CreateVertexDeclaration(dev, elq, &g_declq);
         for (k = 0; k < 2; k++)
@@ -844,6 +847,21 @@ static void do_volumetric(IDirect3DDevice9 *dev)
     IDirect3DDevice9_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, TRUE); IDirect3DDevice9_SetRenderState(dev, D3DRS_SRCBLEND, D3DBLEND_ONE);
     IDirect3DDevice9_SetRenderState(dev, D3DRS_DESTBLEND, D3DBLEND_ONE); IDirect3DDevice9_SetRenderState(dev, D3DRS_BLENDOP, D3DBLENDOP_ADD);
     IDirect3DDevice9_SetRenderState(dev, D3DRS_COLORWRITEENABLE, 0x7);
+    /* half resolution + soft upsample: the full-res march aliased along silhouettes (shimmer behind the statues' heads) */
+    if (g_volHalf && g_psvolc && !g_volT &&
+        SUCCEEDED(IDirect3DDevice9_CreateTexture(dev, BG_W / 2, BG_H / 2, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &g_volT, NULL)))
+        IDirect3DTexture9_GetSurfaceLevel(g_volT, 0, &g_volS);
+    if (g_volHalf && g_volS && g_psvolc) {
+        IDirect3DSurface9 *rt = NULL;
+        IDirect3DDevice9_GetRenderTarget(dev, 0, &rt);
+        IDirect3DDevice9_SetRenderTarget(dev, 0, g_volS);
+        IDirect3DDevice9_Clear(dev, 0, NULL, D3DCLEAR_TARGET, 0, 0, 0);
+        IDirect3DDevice9_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, FALSE);
+        fs_quad(dev, (IDirect3DBaseTexture9 *)g_depTex, g_psvol, (float)(BG_W / 2), (float)(BG_H / 2), (float)BG_W, (float)BG_H);
+        IDirect3DDevice9_SetRenderTarget(dev, 0, rt); if (rt) IDirect3DSurface9_Release(rt);
+        IDirect3DDevice9_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, TRUE);
+        fs_quad(dev, (IDirect3DBaseTexture9 *)g_volT, g_psvolc, (float)BG_W, (float)BG_H, (float)(BG_W / 2), (float)(BG_H / 2));
+    } else
     fs_quad(dev, (IDirect3DBaseTexture9 *)g_depTex, g_psvol, (float)BG_W, (float)BG_H, (float)BG_W, (float)BG_H);
     IDirect3DDevice9_SetSamplerState(dev, 0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
     IDirect3DDevice9_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, FALSE); IDirect3DDevice9_SetRenderState(dev, D3DRS_COLORWRITEENABLE, 0xF);
@@ -1468,6 +1486,7 @@ static void read_ctl(void)
         else if (sscanf(line, "lmemis %f", &a) == 1) g_grade[0] = a;
         else if (sscanf(line, "halo %f", &a) == 1) g_halo = a;
         else if (sscanf(line, "volsteps %f", &a) == 1) g_volSteps = (int)a;
+        else if (sscanf(line, "volhalf %f", &a) == 1) g_volHalf = (int)a;
         else if (sscanf(line, "volfade %f", &a) == 1) g_volFade = a;
         else if (sscanf(line, "volsoft %f", &a) == 1) g_volSoft = a;
         else if (sscanf(line, "voldir %f %f %f", &a, &b, &c) == 3) { g_volDir[0] = a; g_volDir[1] = b; g_volDir[2] = c; }
@@ -2477,7 +2496,7 @@ static void free_gpu(void)
     for (int k = 0; k < 2; k++) { REL(g_blS[k]); REL(g_blT[k]); }
     for (int i = 0; i < g_nparts; i++) { REL(g_parts[i].vb); REL(g_parts[i].ib); REL(g_parts[i].tex); }
     g_nparts = 0;
-    REL(g_fvb); REL(g_fib); REL(g_ftex); REL(g_recS1); REL(g_recS2);
+    REL(g_fvb); REL(g_fib); REL(g_ftex); REL(g_recS1); REL(g_recS2); REL(g_volS); REL(g_volT); REL(g_psvolc);
 #undef REL
 }
 

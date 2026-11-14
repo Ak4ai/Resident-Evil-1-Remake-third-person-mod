@@ -18,8 +18,14 @@ POSE = 'pose' in ARGS   # -- pose : renderiza so da camera atual do jogo (captur
 NCAM = next((int(a) for a in ARGS if a.isdigit()), 6)
 OUT = r'C:\Users\HENRIQUE\Tools\re1mod\preview\verif'; os.makedirs(OUT, exist_ok=True)
 LM_RES = 4096; MIN_TEX = 1.0; TOL_Z = 0.002; TOL_F = 0.003; HID_DIST = 1.0
-COL = {0: (0.55, 0.55, 0.55, 1), 1: (1, 0.05, 0.05, 1), 2: (0.55, 0.55, 0.55, 1), 3: (1, 0.85, 0, 1), 4: (0.55, 0.55, 0.55, 1)}   # FRESTA so no relatorio (teste ainda nao confiavel)
-NOME = {1: 'ZFIGHT', 2: 'ESCONDIDA', 3: 'FINA', 4: 'FRESTA'}
+COL = {0: (0.55, 0.55, 0.55, 1), 1: (1, 0.05, 0.05, 1), 2: (0.55, 0.55, 0.55, 1), 3: (1, 0.85, 0, 1), 4: (0.55, 0.55, 0.55, 1),   # FRESTA so no relatorio (teste ainda nao confiavel)
+       5: (1, 0, 1, 1), 6: (1, 0.45, 0, 1), 7: (0, 0.9, 1, 1), 8: (1, 0.4, 0.7, 1)}
+NOME = {1: 'ZFIGHT', 2: 'ESCONDIDA', 3: 'FINA', 4: 'FRESTA', 5: 'UV_SOBREPOSTO', 6: 'UV_QUEBRADO', 7: 'FORA_DO_JOGO', 8: 'QUASE_COLADA'}
+#   5 UV_SOBREPOSTO ilhas diferentes do UV 'lm' ocupando os mesmos texels: o bake de uma pinta por cima da outra (parede preta)
+#   6 UV_QUEBRADO   canto do UV fora do atlas ou em (0,0), ou face com UV desproporcional ao tamanho real (triangulo gigante)
+#   7 FORA_DO_JOGO  objeto visivel no Blender que nao entra no export/bake (fora de Fit_Dining/Props ou sem UV lm)
+#   8 QUASE_COLADA  superficies de objetos diferentes a 2-15 mm uma da outra, quase paralelas: piscam/tremem de longe
+EXPORT_COLS = ('Fit_Dining', 'Props')
 
 dg = bpy.context.evaluated_depsgraph_get()
 objs = [o for o in bpy.context.scene.objects if o.type == 'MESH' and o.visible_get() and not o.hide_render]
@@ -138,13 +144,90 @@ for oi, o in enumerate(objs):
     base += len(me.polygons); bm.free()
 print('finas', nt, 'frestas', nf, flush=True)
 
+# ---- 5/6/7: UV do lightmap (sobreposicao, quebrado) e objetos fora do export ----
+import numpy as np
+exp_set = {o.name for c in EXPORT_COLS if c in bpy.data.collections for o in bpy.data.collections[c].all_objects}
+R = 1024; owner = np.full((R, R), -1, np.int64); claim = collections.defaultdict(list)   # texel -> faces (so os disputados)
+nu = no = ne = 0; base = 0; isl_id = 0
+for oi, o in enumerate(objs):
+    me = o.data; nP = len(me.polygons)
+    lm = me.uv_layers.get('lm')
+    if o.name not in exp_set or lm is None:
+        for p in me.polygons:
+            if flag[base + p.index] == 0: flag[base + p.index] = 7; ne += 1
+        base += nP; continue
+    uv = np.array([d.uv[:] for d in lm.data], np.float64)
+    # ilhas por posicao+UV (mesma regra do teste FINA)
+    par = list(range(nP))
+    def find(x):
+        while par[x] != x: par[x] = par[par[x]]; x = par[x]
+        return x
+    ek = {}
+    for p in me.polygons:
+        li = list(p.loop_indices); n_ = len(li)
+        for i in range(n_):
+            l0, l1 = li[i], li[(i + 1) % n_]
+            a = (tuple(np.round(me.vertices[me.loops[l0].vertex_index].co, 4)), tuple(np.round(uv[l0], 6)))
+            b = (tuple(np.round(me.vertices[me.loops[l1].vertex_index].co, 4)), tuple(np.round(uv[l1], 6)))
+            k = (a, b) if a < b else (b, a)
+            if k in ek: par[find(p.index)] = find(ek[k])
+            else: ek[k] = p.index
+    roots = {}
+    for p in me.polygons:
+        gi = base + p.index; us = uv[list(p.loop_indices)]
+        r_ = find(p.index); iid = roots.setdefault(r_, isl_id + len(roots))
+        bad = (us.min() < -0.001 or us.max() > 1.001 or np.any(np.all(np.abs(us) < 1e-7, axis=1)))
+        au = 0.0
+        for i in range(1, len(us) - 1): au += abs(np.cross(us[i] - us[0], us[i + 1] - us[0])) / 2
+        dens = math.sqrt(au / max(farea[gi], 1e-9)) * LM_RES   # texels por metro
+        if bad or (farea[gi] > 1e-4 and dens > 400):           # 400 texels/m = 20x a media: UV esticado demais
+            if flag[gi] in (0, 3): flag[gi] = 6; nu += 1
+        # rasteriza a face no atlas reduzido (1024): centro de cada texel coberto
+        P2 = us * R; x0, y0 = np.floor(P2.min(0)).astype(int); x1, y1 = np.ceil(P2.max(0)).astype(int)
+        x0 = max(x0, 0); y0 = max(y0, 0); x1 = min(x1, R); y1 = min(y1, R)
+        if x1 <= x0 or y1 <= y0 or (x1 - x0) * (y1 - y0) > R * R + 1: continue
+        gx, gy = np.meshgrid(np.arange(x0, x1) + 0.5, np.arange(y0, y1) + 0.5)
+        Q = np.stack([gx.ravel(), gy.ravel()], 1); inside = np.zeros(len(Q), bool)
+        for i in range(1, len(P2) - 1):
+            A, B, C = P2[0], P2[i], P2[i + 1]
+            d1 = (Q[:, 0] - B[0]) * (A[1] - B[1]) - (A[0] - B[0]) * (Q[:, 1] - B[1])
+            d2 = (Q[:, 0] - C[0]) * (B[1] - C[1]) - (B[0] - C[0]) * (Q[:, 1] - C[1])
+            d3 = (Q[:, 0] - A[0]) * (C[1] - A[1]) - (C[0] - A[0]) * (Q[:, 1] - A[1])
+            inside |= ~(((d1 < 0) | (d2 < 0) | (d3 < 0)) & ((d1 > 0) | (d2 > 0) | (d3 > 0)))
+        Q = Q[inside].astype(int)
+        if not len(Q): continue
+        cur = owner[Q[:, 1], Q[:, 0]]
+        clash = (cur >= 0) & (cur != iid)
+        for (tx, ty) in Q[clash]: claim[(tx, ty)].append(gi)
+        free_ = cur < 0; owner[Q[free_, 1], Q[free_, 0]] = iid
+        if clash.any(): claim[('face', gi)] = [int(c) for c in np.unique(cur[clash])]
+    isl_id += len(roots); base += nP
+# marca as duas partes de cada disputa
+isl_faces = collections.defaultdict(list)
+over = set(gi for k, v in claim.items() if k[0] != 'face' for gi in v)
+for gi in over:
+    if flag[gi] in (0, 3): flag[gi] = 5; no += 1
+print('uv quebrado', nu, 'uv sobreposto', no, 'fora do jogo', ne, flush=True)
+
+# ---- 8: superficies quase coladas (2-15 mm, quase paralelas, objetos diferentes) ----
+nq = 0
+for fi in range(len(F)):
+    if flag[fi] or farea[fi] < 1e-5: continue
+    n = fnorm[fi]; hit = 0
+    for s in samples(fi):
+        for sgn in (1, -1):
+            loc, nn, idx, d = bvh.ray_cast(s + n * sgn * 0.0005, n * sgn, 0.015)
+            if idx is not None and idx != fi and fo[idx] != fo[fi] and d > 0.0015 and abs(fnorm[idx].dot(n)) > 0.97: hit += 1; break
+    if hit >= 3: flag[fi] = 8; nq += 1
+print('quase coladas', nq, flush=True)
+
 # ---- relatorio ----
 porobj = collections.defaultdict(lambda: collections.Counter())
 for fi, k in enumerate(flag):
     if k: porobj[objs[fo[fi]].name][NOME[k]] += 1
 with open(os.path.join(OUT, 'relatorio.txt'), 'w', encoding='utf-8') as fh:
     fh.write('VERIFICADOR %s\nfaces %d\n' % (bpy.data.filepath, len(F)))
-    for k in (1, 2, 3, 4):
+    for k in (1, 2, 3, 4, 5, 6, 7, 8):
         ar = sum(farea[i] for i in range(len(F)) if flag[i] == k)
         fh.write('%-10s %6d faces  %.2f m2\n' % (NOME[k], flag.count(k), ar))
     fh.write('\npor objeto:\n')

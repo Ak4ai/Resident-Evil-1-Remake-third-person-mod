@@ -164,8 +164,8 @@ static const char g_hlsl[] =
     "  return float4(max(r+n*w,0.0),c.a); }\n"
     "float4 psvol(VOQ i, float2 vp:VPOS):COLOR0{ float d=tex2D(S0,i.uv).r; if(d<=0.0||d>=1.0) d=0.9999;\n"
     "  float4 w=mul(float4(i.uv.x*2-1,1-i.uv.y*2,d,1),IVP); float3 P=w.xyz/w.w; float3 R=P-VCAM.xyz; float L=length(R); R/=L; L=min(L,VCOL.w);\n"
-    "  float n=frac(52.9829189*frac(dot(vp,float2(0.06711056,0.00583715)))); float acc=0; int N=(int)VT.y;\n"
-    "  [loop] for(int k=0;k<32;k++){ if(k>=N) break; float3 S=VCAM.xyz+R*(L*(k+n)/N);\n"
+    "  float n=0.5; float acc=0; int N=(int)VT.y;\n"
+    "  [loop] for(int k=0;k<64;k++){ if(k>=N) break; float3 S=VCAM.xyz+R*(L*(k+n)/N);\n"
     "    float dust=0.8+0.2*sin(S.x*0.035+VT.x*0.25)*sin(S.y*0.05-VT.x*0.17)*sin(S.z*0.04+VT.x*0.13);\n"
     "    acc+=beam(S)*dust; }\n"
     "  return float4(VCOL.rgb*(1.0-exp(-(acc/N)*L*VLD.w)),0); }\n";
@@ -204,7 +204,7 @@ static int g_knifeOff = 1;      /* ctl: knifeoff 0 = keep the gun arm pose even 
 static float g_bloomTh = 0.35f, g_bloomStr = 0.6f; /* ctl: bloom <strength> (0 = off), bloomlim <threshold> */
 static float g_pre1[6] = { -75.8f, 208.8f, 46.7f, 2.54f, -0.16f, 55.0f }; /* ctl preset1: central room camera (game units) */
 static int g_shots, g_swId, g_shotK;
-static float g_vol = 1.0f, g_volDir[3] = { -0.22f, -0.62f, -1.0f }, g_volCol[3] = { 0.50f, 0.62f, 0.85f }; static int g_volSteps = 24; static float g_volFade = 220.0f, g_volSoft = 18.0f; /* ctl volfade, volsoft (cm) */ /* ctl vol, voldir, volcol, volsteps */
+static float g_vol = 1.0f, g_volDir[3] = { -0.22f, -0.62f, -1.0f }, g_volCol[3] = { 0.50f, 0.62f, 0.85f }; static int g_volSteps = 48; static float g_volFade = 220.0f, g_volSoft = 18.0f; /* ctl volfade, volsoft (cm) */ /* ctl vol, voldir, volcol, volsteps */
 static IDirect3DPixelShader9 *g_psvol, *g_psgrain; static IDirect3DTexture9 *g_postT; static IDirect3DSurface9 *g_postS;
 static float g_thExpo = 1.2f;
 static int g_thArm, g_thLater;
@@ -831,7 +831,7 @@ static int inv4(const float *m, float *o)
 static void do_volumetric(IDirect3DDevice9 *dev)
 {
     float ivp[16], cam[4] = { g_pos[0], g_pos[1], g_pos[2], 1 }, ld[4], win[4] = { -525.0f, 8.0f, 540.0f, 68.0f }, win2[4] = { 382.0f, 92.0f, 205.0f, 3.0f };
-    float wf = g_flash > 1 ? 1 : g_flash, col[4] = { g_volCol[0] + (0.85f - g_volCol[0]) * wf, g_volCol[1] + (0.88f - g_volCol[1]) * wf, g_volCol[2] + (0.95f - g_volCol[2]) * wf, 1800.0f }, vt[4] = { GetTickCount() * 0.001f, (float)(g_volSteps < 4 ? 4 : g_volSteps > 32 ? 32 : g_volSteps), g_volFade < 10 ? 10 : g_volFade, g_volSoft < 1 ? 1 : g_volSoft };
+    float wf = g_flash > 1 ? 1 : g_flash, col[4] = { g_volCol[0] + (0.85f - g_volCol[0]) * wf, g_volCol[1] + (0.88f - g_volCol[1]) * wf, g_volCol[2] + (0.95f - g_volCol[2]) * wf, 1800.0f }, vt[4] = { GetTickCount() * 0.001f, (float)(g_volSteps < 4 ? 4 : g_volSteps > 64 ? 64 : g_volSteps), g_volFade < 10 ? 10 : g_volFade, g_volSoft < 1 ? 1 : g_volSoft };
     float n = sqrtf(g_volDir[0] * g_volDir[0] + g_volDir[1] * g_volDir[1] + g_volDir[2] * g_volDir[2]);
     if (g_vol <= 0 || !g_psvol || !g_vsq || !g_declq || n < 1e-6f || !inv4(g_M, ivp)) return;
     ld[0] = g_volDir[0] / n; ld[1] = g_volDir[1] / n; ld[2] = g_volDir[2] / n; ld[3] = g_vol * 0.0012f * (1.0f + 3.5f * g_flash);

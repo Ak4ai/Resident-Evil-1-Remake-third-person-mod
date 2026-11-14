@@ -1049,7 +1049,7 @@ static float g_folCap = 0.1f;   /* max auto-follow rotation per frame, rad (~6 d
 static float g_camAcc = 0.25f; /* camera angular-velocity smoothing: lower = silkier but more lag (ctl: camacc, 1 = off) */
 static float g_faceK = 0.4f; /* how fast the filtered facing tracks the real one (ctl: facek; 1 = no filter) */
 static float g_lsK = 1.0f; static int g_inBack, g_holdFol, g_noFolBack = 1; /* left-stick smoothing; stick pulled down (240..300 deg) pauses camera recentering (ctl: lssmooth, nofolback) */
-static float g_camPitch, g_rsSensY = 0.05f, g_pitchMax = 85.0f; static int g_invY; /* right stick up/down orbits the camera vertically (ctl: rssensy, pitchmax degrees, invy) */
+static float g_camPitch, g_rsSensY = 0.05f, g_pitchMax = 85.0f, g_pitchBack = 0.04f; static int g_invY, g_pitchHold = 90, g_pitchIdle; /* recenter after pitchhold frames without vertical stick, at pitchback per frame */ /* right stick up/down orbits the camera vertically (ctl: rssensy, pitchmax degrees, invy) */
 static float g_rsSens = 0.09f; static int g_rsHold = 8; /* right-stick orbit speed per frame; frames to wait before recentering (ctl: rssens, rshold) */
 static float g_folBoost = 6.0f; /* extra follow speed for large angles (ctl: folboost) */
 static float g_folMax = 3.3f; /* auto-follow works up to this angle between camera and facing (ctl: folmax) */
@@ -1432,6 +1432,8 @@ static void read_ctl(void)
         else if (sscanf(line, "rssens %f", &a) == 1) g_rsSens = a;
         else if (sscanf(line, "rssensy %f", &a) == 1) g_rsSensY = a;
         else if (sscanf(line, "pitchmax %f", &a) == 1) g_pitchMax = a;
+        else if (sscanf(line, "pitchhold %f", &a) == 1) g_pitchHold = (int)a;
+        else if (sscanf(line, "pitchback %f", &a) == 1) g_pitchBack = a;
         else if (sscanf(line, "invy %f", &a) == 1) g_invY = (int)a;
         else if (sscanf(line, "lssmooth %f", &a) == 1) g_lsK = a;
         else if (sscanf(line, "facek %f", &a) == 1) g_faceK = a;
@@ -1760,6 +1762,7 @@ static void follow_cam(void)
     } else
     { float lim = g_pitchMax * 0.0174533f;
       if (g_aimBlend < 0.02f) g_camPitch += g_padRY * g_rsSensY * (g_invY ? -1.0f : 1.0f);
+      if (fabsf(g_padRY) > 0.05f) g_pitchIdle = 0; else if (++g_pitchIdle > g_pitchHold) g_camPitch *= 1.0f - g_pitchBack;
       if (g_camPitch > lim) g_camPitch = lim; if (g_camPitch < -lim) g_camPitch = -lim; }
     g_camYaw -= g_padRX * (g_rsSens + g_aimBlend * (g_aimSens - g_rsSens)); /* right stick orbits the camera smoothly (right stick right = camera swings right) */
     if (!g_native) {

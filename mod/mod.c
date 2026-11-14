@@ -188,7 +188,7 @@ static IDirect3DPixelShader9 *g_psc3, *g_psd3;
 static int g_rms3; /* 3 = RMS3 (pos,uv,colour; 24 B), 4 = RMS4 (pos,uv,lmuv,colour; 32 B) + lightmap */
 static IDirect3DVertexDeclaration9 *g_decl4; static IDirect3DVertexShader9 *g_vs4; static IDirect3DPixelShader9 *g_psc4, *g_psd4;
 static IDirect3DTexture9 *g_lmTex[4]; static int g_lmHasA[4];
-static float g_lmRel = 1.0f, g_lmLuar = 1.0f, g_relCol[3] = { 0.85f, 0.90f, 1.0f }, g_luarCol[3] = { 0.55f, 0.65f, 1.0f }; /* ctl lmrel, lmluar: lightning / moonlight window layers */ /* lightmap layers: base, lareira, velas, arandelas (gamma-2 encoded, x4) */
+static float g_lmRel = 1.0f, g_lmLuar = 6.0f, g_relCol[3] = { 0.85f, 0.90f, 1.0f }, g_luarCol[3] = { 0.55f, 0.65f, 1.0f }; /* ctl lmrel, lmluar: lightning / moonlight window layers */ /* lightmap layers: base, lareira, velas, arandelas (gamma-2 encoded, x4) */
 static IDirect3DVertexShader9 *g_vsq;
 static IDirect3DPixelShader9 *g_psbr, *g_psbh, *g_psbv, *g_psba;
 static IDirect3DVertexDeclaration9 *g_declq;

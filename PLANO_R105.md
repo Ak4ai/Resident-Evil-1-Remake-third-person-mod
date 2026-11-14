@@ -143,3 +143,7 @@ Pendências que só o bake completo resolve; juntar todas numa rodada só (ver m
 3. **Camada de relâmpago** (como o original, que pisca o fundo inteiro no trovão): luz forte branco-azulada entrando pelas 3 janelas da parede norte (área/sol na direção do `voldir`), com sombras dos caixilhos e da mobília no chão, mesa e paredes. Guardar em tons de cinza no **canal alfa** do PNG da camada `base` (sem textura nova, por causa da memória do jogo de 32 bits). No shader: `L += alfa_base * g_flash * cor`.
 4. **Camada de luar** (opcional, mesmo esquema): as manchas das janelas no chão, fixas, no canal alfa de outra camada (ex.: `lareira`), para combinar com os feixes volumétricos.
 5. Depois do bake: `despeckle_lm.py` → `dilate_lm.py` → `lm_layers_to_png.py` (com flipud) → export → conferir nas câmeras originais (`gamecam 1`, `shot N`).
+
+## Pendências anotadas (14/11)
+- **Feixe de luar (volumétrico) ainda treme quando a câmera anda ou gira.** Parado já não treme (zona morta `camdz 4` na âncora da câmera). Já testado sem resolver: mais amostras (`volsteps 48`), borda mais suave (`volsoft 45`), sombra dos caixilhos mais larga (`volbar 14`), meia resolução (`volhalf 1`), acúmulo temporal (`voltaa 0.85`). `vol 0` some com o tremor. Próximas ideias: reprojeção do histórico pela câmera anterior (TAA de verdade), ou feixe analítico (integral fechada por janela, sem marcha de raio).
+- Teste de frestas do verificador ainda dá falso positivo (só no relatório).

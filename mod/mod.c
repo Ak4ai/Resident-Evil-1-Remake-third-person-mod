@@ -94,6 +94,8 @@ static const char g_hlsl[] =
     /* RMS4: lightmap in s1 (second UV), colour alpha 0 = light source (uses colour instead, kept for bloom mask) */
     "sampler2D S1 : register(s1); sampler2D S2 : register(s2); sampler2D S3 : register(s3); sampler2D S4 : register(s4);\n"
     "float4 LW : register(c3);\n"
+    "float4 WL : register(c17);\n"
+    "float4 WM : register(c18);\n"
     "float4 LM : register(c4);\n"
     "float4 GR : register(c5);\n"
     "float4 SL[6] : register(c6);\n"
@@ -103,8 +105,8 @@ static const char g_hlsl[] =
     "float3 spec4(float3 wp){ float3 n=normalize(cross(ddx(wp),ddy(wp))); float3 V=normalize(CAM.xyz-wp); if(dot(n,V)<0) n=-n; float s=0;\n"
     "  for(int k=0;k<6;k++){ float3 Lv=SL[k].xyz-wp; float d2=dot(Lv,Lv); Lv*=rsqrt(d2); float3 H=normalize(Lv+V); s+=pow(saturate(dot(n,H)),SP.y)*SL[k].w/(1.0+d2*SP.z); }\n"
     "  return s*SP.x*GL.x*float3(1.0,0.82,0.55); }\n"
-    "float3 lm4(float2 u){ float3 a=tex2D(S1,u).rgb, b=tex2D(S2,u).rgb, c=tex2D(S3,u).rgb, d=tex2D(S4,u).rgb;\n"
-    "  float3 L=(a*a*LW.x+b*b*LW.y+c*c*LW.z+d*d*LW.w)*4.0+LM.x; L=L*(1.0+LM.y)/(1.0+LM.y*L); return pow(max(L,1e-5),0.4545); }\n"
+    "float3 lm4(float2 u){ float4 A=tex2D(S1,u), B=tex2D(S2,u); float3 a=A.rgb, b=B.rgb, c=tex2D(S3,u).rgb, d=tex2D(S4,u).rgb;\n"
+    "  float3 L=(a*a*LW.x+b*b*LW.y+c*c*LW.z+d*d*LW.w+A.a*A.a*WL.xyz+B.a*B.a*WM.xyz)*4.0+LM.x; L=L*(1.0+LM.y)/(1.0+LM.y*L); return pow(max(L,1e-5),0.4545); }\n"
     "struct VO4 { float4 p:POSITION; float2 uv:TEXCOORD1; float2 zw:TEXCOORD0; float2 lm:TEXCOORD2; float4 c:COLOR0; float3 wp:TEXCOORD3; };\n"
     "VO4 vs4(float3 pos:POSITION, float2 uv:TEXCOORD0, float2 lm:TEXCOORD1, float4 col:COLOR0){ VO4 o; o.p=mul(float4(pos,1),VP); o.uv=uv; o.zw=o.p.zw; o.lm=lm; o.c=col; o.wp=pos; return o; }\n"
     "float4 psc4(VO4 i, float2 vp:VPOS):COLOR0{\n"
@@ -185,7 +187,8 @@ static IDirect3DVertexShader9 *g_vs3;
 static IDirect3DPixelShader9 *g_psc3, *g_psd3;
 static int g_rms3; /* 3 = RMS3 (pos,uv,colour; 24 B), 4 = RMS4 (pos,uv,lmuv,colour; 32 B) + lightmap */
 static IDirect3DVertexDeclaration9 *g_decl4; static IDirect3DVertexShader9 *g_vs4; static IDirect3DPixelShader9 *g_psc4, *g_psd4;
-static IDirect3DTexture9 *g_lmTex[4]; /* lightmap layers: base, lareira, velas, arandelas (gamma-2 encoded, x4) */
+static IDirect3DTexture9 *g_lmTex[4]; static int g_lmHasA[4];
+static float g_lmRel = 1.0f, g_lmLuar = 1.0f, g_relCol[3] = { 0.85f, 0.90f, 1.0f }, g_luarCol[3] = { 0.55f, 0.65f, 1.0f }; /* ctl lmrel, lmluar: lightning / moonlight window layers */ /* lightmap layers: base, lareira, velas, arandelas (gamma-2 encoded, x4) */
 static IDirect3DVertexShader9 *g_vsq;
 static IDirect3DPixelShader9 *g_psbr, *g_psbh, *g_psbv, *g_psba;
 static IDirect3DVertexDeclaration9 *g_declq;
@@ -600,7 +603,8 @@ static int load_mesh2(IDirect3DDevice9 *dev, const char *dir, const char *name)
     if (g_rms3 == 4) { char lmn[64], lp[MAX_PATH]; static const char *ln[4] = { "base", "lareira", "velas", "arandelas" }; int li; HRESULT lh = S_OK;
         ReadFile(h, lmn, 64, &rd, NULL); lmn[63] = 0;
         for (li = 0; li < 4 && SUCCEEDED(lh); li++) { snprintf(lp, sizeof lp, "%s\\%s%s.png", dir, lmn, ln[li]); lh = mk ? mk(dev, lp, &g_lmTex[li]) : E_FAIL;
-            M_("lightmap %s hr=0x%lx\n", lp, (unsigned long)lh); }
+            if (SUCCEEDED(lh) && g_lmTex[li]) { D3DSURFACE_DESC dsc; IDirect3DTexture9_GetLevelDesc(g_lmTex[li], 0, &dsc); g_lmHasA[li] = dsc.Format == D3DFMT_A8R8G8B8; }
+            M_("lightmap %s hr=0x%lx alfa=%d\n", lp, (unsigned long)lh, g_lmHasA[li]); }
         if (FAILED(lh)) { for (li = 0; li < 4; li++) if (g_lmTex[li]) { IDirect3DTexture9_Release(g_lmTex[li]); g_lmTex[li] = NULL; } g_rms3 = 0; } }
     if ((magic != 0x32534D52 && !g_rms3) || np == 0 || np > MAXPARTS || !mk) { M_("mesh2 bad header magic=%08lx np=%lu mk=%p\n", (unsigned long)magic, (unsigned long)np, (void *)mk); CloseHandle(h); return 0; }
     M_("mesh format RMS%d\n", g_rms3 ? g_rms3 : 2);
@@ -963,6 +967,9 @@ static void draw_scene(IDirect3DDevice9 *dev, int depthPass)
                 IDirect3DDevice9_SetPixelShaderConstantF(dev, 6, &sl[0][0], 6); IDirect3DDevice9_SetPixelShaderConstantF(dev, 13, g_spec, 1);
                 IDirect3DDevice9_SetPixelShaderConstantF(dev, 14, cam, 1); } }
             { float lm[4] = { g_lmAmb + g_flash * g_thAmb, g_lmTone, (float)g_lmDbg, g_lmClip }; lw[0] *= g_lmW[0]; lw[1] *= g_lmW[1]; lw[2] *= g_lmW[2]; lw[3] *= g_lmW[3];
+              { float fl = g_flash > 1 ? 1 : g_flash, wl[4] = { 0, 0, 0, 0 }, wm[4] = { 0, 0, 0, 0 }; int c_;
+                for (c_ = 0; c_ < 3; c_++) { if (g_lmHasA[0]) wl[c_] = g_relCol[c_] * g_lmRel * fl; if (g_lmHasA[1]) wm[c_] = g_luarCol[c_] * g_lmLuar; }
+                IDirect3DDevice9_SetPixelShaderConstantF(dev, 17, wl, 1); IDirect3DDevice9_SetPixelShaderConstantF(dev, 18, wm, 1); }
               IDirect3DDevice9_SetPixelShaderConstantF(dev, 3, lw, 1); IDirect3DDevice9_SetPixelShaderConstantF(dev, 4, lm, 1); IDirect3DDevice9_SetPixelShaderConstantF(dev, 5, g_grade, 1); }
             for (li = 0; li < 4; li++) {
                 IDirect3DDevice9_SetTexture(dev, 1 + li, (IDirect3DBaseTexture9 *)g_lmTex[li]);
@@ -1554,6 +1561,8 @@ static void read_ctl(void)
         else if (sscanf(line, "preset1 %f %f %f %f %f %f", &g_pre1[0], &g_pre1[1], &g_pre1[2], &g_pre1[3], &g_pre1[4], &g_pre1[5]) == 6) {}
         else if (sscanf(line, "lmtone %f", &a) == 1) g_lmTone = a;
         else if (sscanf(line, "lmw0 %f", &a) == 1) g_lmW[0] = a;
+        else if (sscanf(line, "lmrel %f", &a) == 1) g_lmRel = a;
+        else if (sscanf(line, "lmluar %f", &a) == 1) g_lmLuar = a;
         else if (sscanf(line, "lmw1 %f", &a) == 1) g_lmW[1] = a;
         else if (sscanf(line, "lmw2 %f", &a) == 1) g_lmW[2] = a;
         else if (sscanf(line, "lmw3 %f", &a) == 1) g_lmW[3] = a;

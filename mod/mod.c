@@ -481,8 +481,101 @@ static int load_mesh(IDirect3DDevice9 *dev, const char *dir, const char *name)
 }
 
 /* textured multi-part mesh: 'RMS2', u32 nparts, then per part: char tex[64], u32 nv, u32 nf, nv*(float3 pos,float2 uv), nf*3*u32 */
+
+/* ---- camera collision (modern third-person): CPU copy of the room triangles in a uniform grid; each frame a "thick ray"
+   (5 parallel rays) goes from Jill's shoulder to the wanted camera position and the camera stops in front of the first hit.
+   It moves in at once and eases back out. ctl: camcol 0/1, camrad <cm>, camout <0..1 ease-out per frame> */
+static float *g_ct; static int g_ctN, g_ctCap;               /* triangles, 9 floats each (game cm) */
+static int *g_cgStart, *g_cgList, *g_cgStamp; static int g_cgDim[3], g_cgStampN; static float g_cg0[3], g_cgCell = 60.0f;
+static int g_camCol = 1; static float g_camRad = 18.0f, g_camOut = 0.10f, g_colDist = -1;
+static void col_reset(void) { free(g_ct); free(g_cgStart); free(g_cgList); free(g_cgStamp); g_ct = NULL; g_cgStart = g_cgList = g_cgStamp = NULL; g_ctN = g_ctCap = 0; }
+static void col_add_part(const char *name, const BYTE *vb, DWORD vs, const DWORD *ib, DWORD nf)
+{
+    DWORD t; int k;
+    if (strstr(name, "paisagem") || strstr(name, "flame") || strstr(name, "fire")) return;   /* outside view, flames: no collision */
+    if (g_ctN + (int)nf > g_ctCap) { g_ctCap = (g_ctN + (int)nf) * 2; g_ct = (float *)realloc(g_ct, (size_t)g_ctCap * 36); }
+    for (t = 0; t < nf; t++) {
+        float *d = g_ct + (size_t)g_ctN * 9;
+        for (k = 0; k < 3; k++) memcpy(d + k * 3, vb + (size_t)ib[t * 3 + k] * vs, 12);
+        g_ctN++;
+    }
+}
+static void col_build(void)
+{
+    float mn[3] = { 1e9f, 1e9f, 1e9f }, mx[3] = { -1e9f, -1e9f, -1e9f }; int i, k, n, *cnt, pass;
+    if (!g_ctN) return;
+    for (i = 0; i < g_ctN * 3; i++) for (k = 0; k < 3; k++) { float v = g_ct[i * 3 + k]; if (v < mn[k]) mn[k] = v; if (v > mx[k]) mx[k] = v; }
+    for (k = 0; k < 3; k++) { g_cg0[k] = mn[k] - 1; g_cgDim[k] = (int)((mx[k] - mn[k] + 2) / g_cgCell) + 1; }
+    n = g_cgDim[0] * g_cgDim[1] * g_cgDim[2];
+    cnt = (int *)calloc(n + 1, sizeof(int)); g_cgStart = (int *)calloc(n + 1, sizeof(int));
+    for (pass = 0; pass < 2; pass++) {
+        if (pass == 1) { int acc = 0; for (i = 0; i < n; i++) { g_cgStart[i] = acc; acc += cnt[i]; cnt[i] = 0; } g_cgStart[n] = acc; g_cgList = (int *)malloc((size_t)(acc + 1) * sizeof(int)); }
+        for (i = 0; i < g_ctN; i++) {
+            const float *t = g_ct + (size_t)i * 9; int a[3], b[3], x, y, z;
+            for (k = 0; k < 3; k++) {
+                float lo = fminf(t[k], fminf(t[3 + k], t[6 + k])), hi = fmaxf(t[k], fmaxf(t[3 + k], t[6 + k]));
+                a[k] = (int)((lo - g_cg0[k]) / g_cgCell); b[k] = (int)((hi - g_cg0[k]) / g_cgCell);
+            }
+            for (x = a[0]; x <= b[0]; x++) for (y = a[1]; y <= b[1]; y++) for (z = a[2]; z <= b[2]; z++) {
+                int c = (x * g_cgDim[1] + y) * g_cgDim[2] + z;
+                if (pass == 0) cnt[c]++; else g_cgList[g_cgStart[c] + cnt[c]++] = i;
+            }
+        }
+    }
+    free(cnt); g_cgStamp = (int *)calloc(g_ctN, sizeof(int));
+    M_("camcol: %d triangulos, grade %dx%dx%d" "\n", g_ctN, g_cgDim[0], g_cgDim[1], g_cgDim[2]);
+}
+/* nearest hit t in [0,1] of segment a->a+d against the room (two-sided); 1 = free */
+static float col_ray(const float *a, const float *d)
+{
+    float best = 1.0f, len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]); int steps, s_, k, lastc = -1;
+    if (!g_cgList || len < 1) return 1.0f;
+    g_cgStampN++; steps = (int)(len / (g_cgCell * 0.5f)) + 2;
+    for (s_ = 0; s_ <= steps; s_++) {
+        float f = (float)s_ / steps, q[3]; int c, ci[3], j;
+        for (k = 0; k < 3; k++) { q[k] = a[k] + d[k] * f; ci[k] = (int)((q[k] - g_cg0[k]) / g_cgCell); if (ci[k] < 0 || ci[k] >= g_cgDim[k]) break; }
+        if (k < 3) continue;
+        c = (ci[0] * g_cgDim[1] + ci[1]) * g_cgDim[2] + ci[2];
+        if (c == lastc) continue; lastc = c;
+        for (j = g_cgStart[c]; j < g_cgStart[c + 1]; j++) {
+            int ti = g_cgList[j]; const float *t = g_ct + (size_t)ti * 9; float e1[3], e2[3], h[3], sv[3], qv[3], det, u, v, tt;
+            if (g_cgStamp[ti] == g_cgStampN) continue; g_cgStamp[ti] = g_cgStampN;
+            for (k = 0; k < 3; k++) { e1[k] = t[3 + k] - t[k]; e2[k] = t[6 + k] - t[k]; sv[k] = a[k] - t[k]; }
+            h[0] = d[1] * e2[2] - d[2] * e2[1]; h[1] = d[2] * e2[0] - d[0] * e2[2]; h[2] = d[0] * e2[1] - d[1] * e2[0];
+            det = e1[0] * h[0] + e1[1] * h[1] + e1[2] * h[2]; if (fabsf(det) < 1e-6f) continue;
+            u = (sv[0] * h[0] + sv[1] * h[1] + sv[2] * h[2]) / det; if (u < 0 || u > 1) continue;
+            qv[0] = sv[1] * e1[2] - sv[2] * e1[1]; qv[1] = sv[2] * e1[0] - sv[0] * e1[2]; qv[2] = sv[0] * e1[1] - sv[1] * e1[0];
+            v = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) / det; if (v < 0 || u + v > 1) continue;
+            tt = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) / det;
+            if (tt > 0 && tt < best) best = tt;
+        }
+    }
+    return best;
+}
+/* pulls cam in front of walls between pivot and cam */
+static void col_camera(const float *pivot, float *cam, const float *right)
+{
+    float d[3], len, up[3] = { 0, 1, 0 }, side[3], best = 1.0f, want, tot; int k, i;
+    if (!g_camCol || !g_ctN) { g_colDist = -1; return; }
+    for (k = 0; k < 3; k++) d[k] = cam[k] - pivot[k];
+    len = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]); if (len < 1) return;
+    tot = len + g_camRad;                                     /* reach a bit past the camera so it keeps a radius from the wall */
+    for (k = 0; k < 3; k++) d[k] *= tot / len;
+    for (i = 0; i < 5; i++) {
+        float o[3], t;
+        for (k = 0; k < 3; k++) {
+            side[k] = i == 1 ? right[k] : i == 2 ? -right[k] : i == 3 ? up[k] : i == 4 ? -up[k] : 0;
+            o[k] = pivot[k] + side[k] * g_camRad * 0.8f;
+        }
+        t = col_ray(o, d); if (t < best) best = t;
+    }
+    want = best * tot - g_camRad; if (want < 10) want = 10; if (want > len) want = len;
+    if (g_colDist < 0 || want < g_colDist) g_colDist = want; else g_colDist += (want - g_colDist) * g_camOut;
+    for (k = 0; k < 3; k++) cam[k] = pivot[k] + (cam[k] - pivot[k]) * (g_colDist / len);
+}
 static int load_mesh2(IDirect3DDevice9 *dev, const char *dir, const char *name)
 {
+    col_reset();
     char p[MAX_PATH]; HANDLE h; DWORD rd, magic, np; void *dst; int i;
     HMODULE dx = LoadLibraryA("d3dx9_43.dll");
     PFNTexFile mk = dx ? (PFNTexFile)GetProcAddress(dx, "D3DXCreateTextureFromFileA") : NULL;
@@ -533,14 +626,20 @@ static int load_mesh2(IDirect3DDevice9 *dev, const char *dir, const char *name)
             FAILED(IDirect3DDevice9_CreateIndexBuffer(dev, nf * 12, D3DUSAGE_WRITEONLY, (D3DFORMAT)102, D3DPOOL_DEFAULT, &pt->ib, NULL))) {
             M_("mesh2 buffers failed part %d\n", i); CloseHandle(h); return 0;
         }
-        IDirect3DVertexBuffer9_Lock(pt->vb, 0, 0, &dst, 0); ReadFile(h, dst, nv * vs, &rd, NULL); IDirect3DVertexBuffer9_Unlock(pt->vb);
-        IDirect3DIndexBuffer9_Lock(pt->ib, 0, 0, &dst, 0); ReadFile(h, dst, nf * 12, &rd, NULL); IDirect3DIndexBuffer9_Unlock(pt->ib);
+        { BYTE *cv = (BYTE *)malloc((size_t)nv * vs); DWORD *ci = (DWORD *)malloc((size_t)nf * 12);
+          if (cv && ci) {
+              ReadFile(h, cv, nv * vs, &rd, NULL); ReadFile(h, ci, nf * 12, &rd, NULL);
+              IDirect3DVertexBuffer9_Lock(pt->vb, 0, 0, &dst, 0); memcpy(dst, cv, (size_t)nv * vs); IDirect3DVertexBuffer9_Unlock(pt->vb);
+              IDirect3DIndexBuffer9_Lock(pt->ib, 0, 0, &dst, 0); memcpy(dst, ci, (size_t)nf * 12); IDirect3DIndexBuffer9_Unlock(pt->ib);
+              col_add_part(pt->name, cv, vs, ci, nf);
+          }
+          free(cv); free(ci); }
         snprintf(tp, sizeof tp, "%s\\%s", dir, pt->name);
         hr = mk(dev, tp, &pt->tex);
         M_("mesh2 part %d %s nv=%lu nf=%lu tex hr=0x%lx\n", i, pt->name, (unsigned long)nv, (unsigned long)nf, (unsigned long)hr);
         if (FAILED(hr)) pt->tex = NULL;
     }
-    CloseHandle(h); g_nparts = (int)np; return 1;
+    CloseHandle(h); g_nparts = (int)np; col_build(); return 1;
 }
 
 static IDirect3DTexture9 *solid_tex(IDirect3DDevice9 *dev, DWORD argb)
@@ -1400,6 +1499,9 @@ static void read_ctl(void)
         else if (sscanf(line, "lmw3 %f", &a) == 1) g_lmW[3] = a;
         else if (sscanf(line, "bloomlim %f", &a) == 1) g_bloomTh = a;
         else if (sscanf(line, "hidefx %f", &a) == 1) g_hideFx = (int)a;
+        else if (sscanf(line, "camcol %f", &a) == 1) g_camCol = (int)a;
+        else if (sscanf(line, "camrad %f", &a) == 1) g_camRad = a;
+        else if (sscanf(line, "camout %f", &a) == 1) g_camOut = a;
         else if (sscanf(line, "eventcam %f", &a) == 1) g_eventCam = (int)a;
         else if (sscanf(line, "eventdelay %f", &a) == 1) g_evDelay = (int)a;
         else if (sscanf(line, "weplog %f", &a) == 1) g_wepLog = (int)a;
@@ -1709,6 +1811,7 @@ static void follow_cam(void)
         g_pos[0] = p[0] - sy * dd + r[0] * sh_;
         g_pos[1] = p[1] + g_camh + g_zoom * g_zoomOut * 0.3f;
         g_pos[2] = p[2] - cy * dd + r[2] * sh_;
+        { float pv[3] = { p[0] + r[0] * sh_ * 0.5f, p[1] + g_lookh, p[2] + r[2] * sh_ * 0.5f }; col_camera(pv, g_pos, r); }
         tgt[0] = p[0] + sy * tf + r[0] * sh_ * tl; tgt[1] = p[1] + g_lookh; tgt[2] = p[2] + cy * tf + r[2] * sh_ * tl;
         dx = tgt[0] - g_pos[0]; dz = tgt[2] - g_pos[2];
         g_yaw = atan2f(dx, dz); g_pitch = atan2f(tgt[1] - g_pos[1], sqrtf(dx * dx + dz * dz)) + g_aimPitch * am;

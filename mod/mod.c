@@ -2234,6 +2234,17 @@ HOOKFN(HRESULT, DrawIndexedPrimitive, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT 
     return o_DrawIndexedPrimitive(d, t, bv, mv, nv, si, pc);
 }
 
+static IDirect3DSurface9 *g_recS1, *g_recS2; static void free_gpu(void); static int g_needReinit;
+HOOKFN(HRESULT, Reset, D3DPRESENT_PARAMETERS *pp)
+{
+    HRESULT hr;
+    free_gpu();
+    hr = o_Reset(d, pp);
+    M_("Reset hr=0x%lx: recursos do mod liberados, recriando no proximo quadro\n", (unsigned long)hr);
+    g_needReinit = 1;
+    return hr;
+}
+
 __declspec(dllexport) int mod_init(IDirect3DDevice9 *dev, const char *dir)
 {
     char lp[MAX_PATH];
@@ -2255,7 +2266,7 @@ static void late_init(IDirect3DDevice9 *dev)
     init_renderer(dev, g_dir);
 #define P(n) patch((void **)&g_vt->n, (void *)h_##n, (void **)&o_##n)
     P(SetTransform); P(SetVertexShaderConstantF); P(SetTexture); P(SetViewport);
-    P(SetRenderTarget); P(Clear); P(DrawPrimitive); P(DrawIndexedPrimitive); P(SetPixelShaderConstantF); P(SetStreamSource);
+    P(SetRenderTarget); P(Clear); P(DrawPrimitive); P(DrawIndexedPrimitive); P(SetPixelShaderConstantF); P(SetStreamSource); P(Reset);
 #undef P
 }
 
@@ -2272,6 +2283,14 @@ __declspec(dllexport) void mod_shutdown(void)
         VirtualProtect(g_saved[i].slot, sizeof(void *), old, &old);
     }
     g_nsaved = 0;
+    free_gpu();
+    if (g_mlog) { M_("mod_shutdown\n"); fclose(g_mlog); g_mlog = NULL; }
+}
+
+/* every resource we created on the device; the game's Reset (display change, alt-tab, HDMI) fails with err09 unless all
+   D3DPOOL_DEFAULT objects are gone, so h_Reset frees everything here and mod_present rebuilds it with init_renderer */
+static void free_gpu(void)
+{
 #define REL(p) do { if (p) { (p)->lpVtbl->Release(p); (p) = NULL; } } while (0)
     REL(g_colSurf); REL(g_depSurf); REL(g_zs); REL(g_colTex); REL(g_depTex); REL(g_blk); REL(g_wht);
     REL(g_vtxTex);
@@ -2283,8 +2302,8 @@ __declspec(dllexport) void mod_shutdown(void)
     for (int k = 0; k < 2; k++) { REL(g_blS[k]); REL(g_blT[k]); }
     for (int i = 0; i < g_nparts; i++) { REL(g_parts[i].vb); REL(g_parts[i].ib); REL(g_parts[i].tex); }
     g_nparts = 0;
+    REL(g_fvb); REL(g_fib); REL(g_ftex); REL(g_recS1); REL(g_recS2);
 #undef REL
-    if (g_mlog) { M_("mod_shutdown\n"); fclose(g_mlog); g_mlog = NULL; }
 }
 
 /* crosshair drawn straight onto the back buffer (screen centre = the camera's optical axis: the composite window is pinned so v=0.5 maps to y=0.5) */
@@ -2348,6 +2367,7 @@ __declspec(dllexport) void mod_present(IDirect3DDevice9 *dev)
             M_("window was off-screen at %ld,%ld -> moved to 0,0\n", wr.left, wr.top);
         }
     }
+    if (g_needReinit && g_inited) { g_needReinit = 0; init_renderer(dev, g_dir); M_("recursos recriados apos Reset\n"); }
     if (!g_inited) {
         if (g_frames < 600) return; /* stay out of the way while the game boots */
         late_init(dev);
@@ -2361,7 +2381,7 @@ __declspec(dllexport) void mod_present(IDirect3DDevice9 *dev)
     if (g_shots > 0) { save_shot(dev); g_shots--; }
     {
         /* F8 toggles a low-res recording (one JPG per frame, named with the frame number so it lines up with modlog CAM lines) */
-        static int rec, prevk, nrec; static IDirect3DSurface9 *small_;
+        static int rec, prevk, nrec;
         typedef HRESULT(WINAPI * PFNSave)(const char *, int, IDirect3DSurface9 *, const void *, const RECT *);
         static PFNSave save; static int tried;
         int k8 = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
@@ -2372,18 +2392,17 @@ __declspec(dllexport) void mod_present(IDirect3DDevice9 *dev)
         if (rec && nrec < 1500) {
             IDirect3DSurface9 *bb = NULL;
             if (!tried) { HMODULE dx = LoadLibraryA("d3dx9_43.dll"); save = dx ? (PFNSave)GetProcAddress(dx, "D3DXSaveSurfaceToFileA") : NULL; tried = 1; }
-            if (!small_) IDirect3DDevice9_CreateRenderTarget(dev, 640, 360, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &small_, NULL);
-            if (save && small_ && SUCCEEDED(IDirect3DDevice9_GetBackBuffer(dev, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
+            if (!g_recS1) IDirect3DDevice9_CreateRenderTarget(dev, 640, 360, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &g_recS1, NULL);
+            if (save && g_recS1 && SUCCEEDED(IDirect3DDevice9_GetBackBuffer(dev, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
                 char fn[MAX_PATH];
-                IDirect3DDevice9_StretchRect(dev, bb, NULL, small_, NULL, D3DTEXF_LINEAR);
+                IDirect3DDevice9_StretchRect(dev, bb, NULL, g_recS1, NULL, D3DTEXF_LINEAR);
                 snprintf(fn, sizeof fn, "%s\\rec\\r_%d.jpg", g_dir, g_frames);
-                save(fn, 3 /* D3DXIFF_JPG */, small_, NULL, NULL);
+                save(fn, 3 /* D3DXIFF_JPG */, g_recS1, NULL, NULL);
                 if (g_sceneRT) {
-                    static IDirect3DSurface9 *small2;
-                    if (!small2) IDirect3DDevice9_CreateRenderTarget(dev, 640, 480, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &small2, NULL);
-                    if (small2 && SUCCEEDED(IDirect3DDevice9_StretchRect(dev, g_sceneRT, NULL, small2, NULL, D3DTEXF_LINEAR))) {
+                    if (!g_recS2) IDirect3DDevice9_CreateRenderTarget(dev, 640, 480, D3DFMT_X8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &g_recS2, NULL);
+                    if (g_recS2 && SUCCEEDED(IDirect3DDevice9_StretchRect(dev, g_sceneRT, NULL, g_recS2, NULL, D3DTEXF_LINEAR))) {
                         snprintf(fn, sizeof fn, "%s\\rec\\s_%d.jpg", g_dir, g_frames);
-                        save(fn, 3, small2, NULL, NULL);
+                        save(fn, 3, g_recS2, NULL, NULL);
                     }
                 }
                 nrec++;

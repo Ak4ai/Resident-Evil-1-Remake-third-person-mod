@@ -207,6 +207,7 @@ static float g_pre1[6] = { -75.8f, 208.8f, 46.7f, 2.54f, -0.16f, 55.0f }; /* ctl
 static int g_shots, g_swId, g_shotK;
 static float g_vol = 1.0f, g_volDir[3] = { -0.22f, -0.62f, -1.0f }, g_volCol[3] = { 0.50f, 0.62f, 0.85f }; static int g_volSteps = 48; static float g_volFade = 220.0f, g_volSoft = 18.0f; /* ctl volfade, volsoft (cm) */ /* ctl vol, voldir, volcol, volsteps */
 static IDirect3DPixelShader9 *g_psvolc; static IDirect3DTexture9 *g_volT; static IDirect3DSurface9 *g_volS; static int g_volHalf = 1; /* ctl volhalf 0 = old full-res shafts */
+static float g_volTime = 1.0f; /* ctl voltime: speed of the drifting dust in the shafts (0 = frozen) */
 static float g_volBar = 14.0f; /* softness (cm) of the window-bar shadows inside the shafts; 3 was razor thin and shimmered as the camera moved (ctl volbar) */
 static IDirect3DPixelShader9 *g_psvol, *g_psgrain; static IDirect3DTexture9 *g_postT; static IDirect3DSurface9 *g_postS;
 static float g_thExpo = 1.2f;
@@ -835,7 +836,7 @@ static int inv4(const float *m, float *o)
 static void do_volumetric(IDirect3DDevice9 *dev)
 {
     float ivp[16], cam[4] = { g_pos[0], g_pos[1], g_pos[2], 1 }, ld[4], win[4] = { -525.0f, 8.0f, 540.0f, 68.0f }, win2[4] = { 382.0f, 92.0f, 205.0f, g_volBar };
-    float wf = g_flash > 1 ? 1 : g_flash, col[4] = { g_volCol[0] + (0.85f - g_volCol[0]) * wf, g_volCol[1] + (0.88f - g_volCol[1]) * wf, g_volCol[2] + (0.95f - g_volCol[2]) * wf, 1800.0f }, vt[4] = { GetTickCount() * 0.001f, (float)(g_volSteps < 4 ? 4 : g_volSteps > 64 ? 64 : g_volSteps), g_volFade < 10 ? 10 : g_volFade, g_volSoft < 1 ? 1 : g_volSoft };
+    float wf = g_flash > 1 ? 1 : g_flash, col[4] = { g_volCol[0] + (0.85f - g_volCol[0]) * wf, g_volCol[1] + (0.88f - g_volCol[1]) * wf, g_volCol[2] + (0.95f - g_volCol[2]) * wf, 1800.0f }, vt[4] = { GetTickCount() * 0.001f * g_volTime, (float)(g_volSteps < 4 ? 4 : g_volSteps > 64 ? 64 : g_volSteps), g_volFade < 10 ? 10 : g_volFade, g_volSoft < 1 ? 1 : g_volSoft };
     float n = sqrtf(g_volDir[0] * g_volDir[0] + g_volDir[1] * g_volDir[1] + g_volDir[2] * g_volDir[2]);
     if (g_vol <= 0 || !g_psvol || !g_vsq || !g_declq || n < 1e-6f || !inv4(g_M, ivp)) return;
     ld[0] = g_volDir[0] / n; ld[1] = g_volDir[1] / n; ld[2] = g_volDir[2] / n; ld[3] = g_vol * 0.0012f * (1.0f + 3.5f * g_flash);
@@ -1073,6 +1074,7 @@ static float g_folCap = 0.1f;   /* max auto-follow rotation per frame, rad (~6 d
 static float g_camAcc = 0.25f; /* camera angular-velocity smoothing: lower = silkier but more lag (ctl: camacc, 1 = off) */
 static float g_faceK = 0.4f; /* how fast the filtered facing tracks the real one (ctl: facek; 1 = no filter) */
 static float g_lsK = 1.0f; static int g_inBack, g_holdFol, g_noFolBack = 1; /* left-stick smoothing; stick pulled down (240..300 deg) pauses camera recentering (ctl: lssmooth, nofolback) */
+static float g_camDz = 4.0f; /* ctl camdz: camera anchor dead zone in cm */
 static float g_camPitch, g_rsSensY = 0.05f, g_pitchMax = 85.0f, g_pitchBack = 0.04f; static int g_invY, g_pitchHold = 90, g_pitchIdle; /* recenter after pitchhold frames without vertical stick, at pitchback per frame */ /* right stick up/down orbits the camera vertically (ctl: rssensy, pitchmax degrees, invy) */
 static float g_rsSens = 0.09f; static int g_rsHold = 8; /* right-stick orbit speed per frame; frames to wait before recentering (ctl: rssens, rshold) */
 static float g_folBoost = 6.0f; /* extra follow speed for large angles (ctl: folboost) */
@@ -1455,6 +1457,7 @@ static void read_ctl(void)
         else if (sscanf(line, "folboost %f", &a) == 1) g_folBoost = a;
         else if (sscanf(line, "rssens %f", &a) == 1) g_rsSens = a;
         else if (sscanf(line, "rssensy %f", &a) == 1) g_rsSensY = a;
+        else if (sscanf(line, "camdz %f", &a) == 1) g_camDz = a;
         else if (sscanf(line, "pitchmax %f", &a) == 1) g_pitchMax = a;
         else if (sscanf(line, "pitchhold %f", &a) == 1) g_pitchHold = (int)a;
         else if (sscanf(line, "pitchback %f", &a) == 1) g_pitchBack = a;
@@ -1489,6 +1492,7 @@ static void read_ctl(void)
         else if (sscanf(line, "volsteps %f", &a) == 1) g_volSteps = (int)a;
         else if (sscanf(line, "volhalf %f", &a) == 1) g_volHalf = (int)a;
         else if (sscanf(line, "volbar %f", &a) == 1) g_volBar = a;
+        else if (sscanf(line, "voltime %f", &a) == 1) g_volTime = a;
         else if (sscanf(line, "volfade %f", &a) == 1) g_volFade = a;
         else if (sscanf(line, "volsoft %f", &a) == 1) g_volSoft = a;
         else if (sscanf(line, "voldir %f %f %f", &a, &b, &c) == 3) { g_volDir[0] = a; g_volDir[1] = b; g_volDir[2] = c; }
@@ -1835,6 +1839,16 @@ static void follow_cam(void)
         g_zoom += (zt - g_zoom) * g_zoomRate;
     }
     g_fyaw = g_camYaw;
+    /* camera anchor with a small dead zone: her idle breathing moved the node a few cm every frame, the camera followed and
+       the light shafts (thin features) shimmered even with the player standing still. The anchor only moves once she is
+       more than camdz cm away from it, so walking is unchanged (it trails by at most camdz). ctl: camdz */
+    { static float an[3]; static int has; float d[3], l; int k;
+      if (!has || g_camDz <= 0) { an[0] = p[0]; an[1] = p[1]; an[2] = p[2]; has = 1; }
+      for (k = 0; k < 3; k++) d[k] = p[k] - an[k];
+      l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+      if (l > 200.0f) { an[0] = p[0]; an[1] = p[1]; an[2] = p[2]; }               /* teleport / room change */
+      else if (l > g_camDz) for (k = 0; k < 3; k++) an[k] += d[k] * (1.0f - g_camDz / l);
+      p[0] = an[0]; p[1] = an[1]; p[2] = an[2]; }
     cy = cosf(g_fyaw); sy = sinf(g_fyaw);
     r[0] = -cy; r[1] = 0; r[2] = sy; /* screen right */
     {

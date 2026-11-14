@@ -1049,6 +1049,7 @@ static float g_folCap = 0.1f;   /* max auto-follow rotation per frame, rad (~6 d
 static float g_camAcc = 0.25f; /* camera angular-velocity smoothing: lower = silkier but more lag (ctl: camacc, 1 = off) */
 static float g_faceK = 0.4f; /* how fast the filtered facing tracks the real one (ctl: facek; 1 = no filter) */
 static float g_lsK = 1.0f; static int g_inBack, g_holdFol, g_noFolBack = 1; /* left-stick smoothing; stick pulled down (240..300 deg) pauses camera recentering (ctl: lssmooth, nofolback) */
+static float g_camPitch, g_rsSensY = 0.05f, g_pitchMax = 85.0f; static int g_invY; /* right stick up/down orbits the camera vertically (ctl: rssensy, pitchmax degrees, invy) */
 static float g_rsSens = 0.09f; static int g_rsHold = 8; /* right-stick orbit speed per frame; frames to wait before recentering (ctl: rssens, rshold) */
 static float g_folBoost = 6.0f; /* extra follow speed for large angles (ctl: folboost) */
 static float g_folMax = 3.3f; /* auto-follow works up to this angle between camera and facing (ctl: folmax) */
@@ -1429,6 +1430,9 @@ static void read_ctl(void)
         else if (sscanf(line, "folmax %f", &a) == 1) g_folMax = a;
         else if (sscanf(line, "folboost %f", &a) == 1) g_folBoost = a;
         else if (sscanf(line, "rssens %f", &a) == 1) g_rsSens = a;
+        else if (sscanf(line, "rssensy %f", &a) == 1) g_rsSensY = a;
+        else if (sscanf(line, "pitchmax %f", &a) == 1) g_pitchMax = a;
+        else if (sscanf(line, "invy %f", &a) == 1) g_invY = (int)a;
         else if (sscanf(line, "lssmooth %f", &a) == 1) g_lsK = a;
         else if (sscanf(line, "facek %f", &a) == 1) g_faceK = a;
         else if (sscanf(line, "camacc %f", &a) == 1) g_camAcc = a;
@@ -1754,6 +1758,9 @@ static void follow_cam(void)
         zt = (sspd > 3.0f && back < -0.4f * sspd * sqrtf(sfx * sfx + sfz * sfz)) ? 1.0f : 0.0f;
         g_zoom += (zt - g_zoom) * 0.06f;
     } else
+    { float lim = g_pitchMax * 0.0174533f;
+      if (g_aimBlend < 0.02f) g_camPitch += g_padRY * g_rsSensY * (g_invY ? -1.0f : 1.0f);
+      if (g_camPitch > lim) g_camPitch = lim; if (g_camPitch < -lim) g_camPitch = -lim; }
     g_camYaw -= g_padRX * (g_rsSens + g_aimBlend * (g_aimSens - g_rsSens)); /* right stick orbits the camera smoothly (right stick right = camera swings right) */
     if (!g_native) {
         /* modern follow: while the player walks, the camera swings behind him with a delay; the right stick is only fine adjustment.
@@ -1808,9 +1815,12 @@ static void follow_cam(void)
         if (am > 0.02f) { g_aimPitch += g_padRY * 0.025f; if (g_aimPitch > 0.55f) g_aimPitch = 0.55f; if (g_aimPitch < -0.55f) g_aimPitch = -0.55f; }
         else g_aimPitch *= 0.9f;
         sh_ = (g_shoulder + g_zoom * g_backShift) * (1.0f - am) + g_aimShoulder * am;
-        g_pos[0] = p[0] - sy * dd + r[0] * sh_;
-        g_pos[1] = p[1] + g_camh + g_zoom * g_zoomOut * 0.3f;
-        g_pos[2] = p[2] - cy * dd + r[2] * sh_;
+        { float v0 = g_camh + g_zoom * g_zoomOut * 0.3f - g_lookh, R = sqrtf(dd * dd + v0 * v0), e = atan2f(v0, dd) + g_camPitch * (1.0f - am), lim = 1.5533f, back, up;
+          if (e > lim) e = lim; if (e < -lim) e = -lim;                 /* never past straight up/down (the view would flip) */
+          back = R * cosf(e); up = R * sinf(e);
+          g_pos[0] = p[0] - sy * back + r[0] * sh_;
+          g_pos[1] = p[1] + g_lookh + up;
+          g_pos[2] = p[2] - cy * back + r[2] * sh_; }
         { float pv[3] = { p[0] + r[0] * sh_ * 0.5f, p[1] + g_lookh, p[2] + r[2] * sh_ * 0.5f }; col_camera(pv, g_pos, r); }
         tgt[0] = p[0] + sy * tf + r[0] * sh_ * tl; tgt[1] = p[1] + g_lookh; tgt[2] = p[2] + cy * tf + r[2] * sh_ * tl;
         dx = tgt[0] - g_pos[0]; dz = tgt[2] - g_pos[2];

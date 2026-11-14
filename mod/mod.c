@@ -2286,7 +2286,7 @@ static void ev_update(void)
     }
     if (ev) g_evQuiet = 0; else if (g_inEvent && ++g_evQuiet < g_evDelay) ev = 1;   /* debounce in updates (1 update = 2 frames); ctl eventdelay */
     if (ev && !g_inEvent) { g_inEvent = 1; g_evSaveOn = g_on; g_on = 0; M_("EVENT inicio f=%d -> camera fixa do jogo" "\n", g_frames); }
-    else if (!ev && g_inEvent) { g_inEvent = 0; if (g_evSaveOn >= 0) g_on = g_evSaveOn; g_evSaveOn = -1; M_("EVENT fim f=%d -> camera livre" "\n", g_frames); }
+    else if (!ev && g_inEvent) { g_inEvent = 0; if (g_evSaveOn >= 0) g_on = g_evSaveOn; g_evSaveOn = -1; g_zoom = 0; /* the auto zoom-out kept integrating during the cutscene */ M_("EVENT fim f=%d -> camera livre" "\n", g_frames); }
 }
 static IDirect3DSurface9 *g_recS1, *g_recS2; static void free_gpu(void); static int g_needReinit;
 HOOKFN(HRESULT, Reset, D3DPRESENT_PARAMETERS *pp)

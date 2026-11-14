@@ -144,6 +144,7 @@ static const char g_hlsl[] =
     "float4 VWIN2 : register(c27);\n"
     "float4 VCOL : register(c28);\n"
     "float4 VT : register(c29);\n"
+    "float4 VJ : register(c39);\n"
     "float beam(float3 S){ if(S.z>VWIN2.x) return 0; float t=(VWIN2.x-S.z)/(-VLD.z); float3 Q=S-VLD.xyz*t; float best=0; float sw=VT.w;\n"
     "  float cx[3]={VWIN.x,VWIN.y,VWIN.z}; float hw=VWIN.w;\n"
     "  [unroll] for(int k=0;k<3;k++){ float dx=abs(Q.x-cx[k]); float dy=Q.y-VWIN2.z;\n"
@@ -164,11 +165,12 @@ static const char g_hlsl[] =
     "  return float4(max(r+n*w,0.0),c.a); }\n"
     "float4 psvol(VOQ i, float2 vp:VPOS):COLOR0{ float d=tex2D(S0,i.uv).r; if(d<=0.0||d>=1.0) d=0.9999;\n"
     "  float4 w=mul(float4(i.uv.x*2-1,1-i.uv.y*2,d,1),IVP); float3 P=w.xyz/w.w; float3 R=P-VCAM.xyz; float L=length(R); R/=L; L=min(L,VCOL.w);\n"
-    "  float n=0.5; float acc=0; int N=(int)VT.y;\n"
+    "  float n=frac(52.9829189*frac(dot(vp,float2(0.06711056,0.00583715)))+VJ.x); float acc=0; int N=(int)VT.y;\n"
     "  [loop] for(int k=0;k<64;k++){ if(k>=N) break; float3 S=VCAM.xyz+R*(L*(k+n)/N);\n"
     "    float dust=0.8+0.2*sin(S.x*0.035+VT.x*0.25)*sin(S.y*0.05-VT.x*0.17)*sin(S.z*0.04+VT.x*0.13);\n"
     "    acc+=beam(S)*dust; }\n"
     "  return float4(VCOL.rgb*(1.0-exp(-(acc/N)*L*VLD.w)),0); }\n"
+    "float4 psvolt(VOQ i):COLOR0{ float3 a=tex2D(S0,i.uv).rgb, h=tex2D(S1,i.uv).rgb; return float4(lerp(a,h,VJ.y),1); }\n"
     "float4 psvolc(VOQ i):COLOR0{ float2 o=BL.xy; float3 c=tex2D(S0,i.uv+o*float2(-0.75,-0.75)).rgb+tex2D(S0,i.uv+o*float2(0.75,-0.75)).rgb+tex2D(S0,i.uv+o*float2(-0.75,0.75)).rgb+tex2D(S0,i.uv+o*float2(0.75,0.75)).rgb; return float4(c*0.25,0); }\n";
 
 #define MAXPARTS 64
@@ -206,6 +208,7 @@ static float g_bloomTh = 0.35f, g_bloomStr = 0.6f; /* ctl: bloom <strength> (0 =
 static float g_pre1[6] = { -75.8f, 208.8f, 46.7f, 2.54f, -0.16f, 55.0f }; /* ctl preset1: central room camera (game units) */
 static int g_shots, g_swId, g_shotK;
 static float g_vol = 1.0f, g_volDir[3] = { -0.22f, -0.62f, -1.0f }, g_volCol[3] = { 0.50f, 0.62f, 0.85f }; static int g_volSteps = 48; static float g_volFade = 220.0f, g_volSoft = 18.0f; /* ctl volfade, volsoft (cm) */ /* ctl vol, voldir, volcol, volsteps */
+static IDirect3DPixelShader9 *g_psvolt; static IDirect3DTexture9 *g_volH[2]; static IDirect3DSurface9 *g_volHS[2]; static int g_volHi, g_volHvalid; static float g_volTaa = 0.85f; /* ctl voltaa: history weight (0 = off) */
 static IDirect3DPixelShader9 *g_psvolc; static IDirect3DTexture9 *g_volT; static IDirect3DSurface9 *g_volS; static int g_volHalf = 1; /* ctl volhalf 0 = old full-res shafts */
 static float g_volTime = 1.0f; /* ctl voltime: speed of the drifting dust in the shafts (0 = frozen) */
 static float g_volBar = 14.0f; /* softness (cm) of the window-bar shadows inside the shafts; 3 was razor thin and shimmered as the camera moved (ctl volbar) */
@@ -735,6 +738,7 @@ static int init_renderer(IDirect3DDevice9 *dev, const char *dir)
         if (compile(fn, "psba", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psba); b->vt->release(b); }
         if (compile(fn, "psvol", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psvol); b->vt->release(b); }
         if (compile(fn, "psvolc", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psvolc); b->vt->release(b); }
+        if (compile(fn, "psvolt", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psvolt); b->vt->release(b); }
         if (compile(fn, "psgrain", "ps_3_0", &b)) { IDirect3DDevice9_CreatePixelShader(dev, (DWORD *)b->vt->ptr(b), &g_psgrain); b->vt->release(b); }
         IDirect3DDevice9_CreateVertexDeclaration(dev, elq, &g_declq);
         for (k = 0; k < 2; k++)
@@ -859,10 +863,29 @@ static void do_volumetric(IDirect3DDevice9 *dev)
         IDirect3DDevice9_SetRenderTarget(dev, 0, g_volS);
         IDirect3DDevice9_Clear(dev, 0, NULL, D3DCLEAR_TARGET, 0, 0, 0);
         IDirect3DDevice9_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, FALSE);
+        IDirect3DTexture9 *outT = g_volT;
+        { float vj[4] = { (float)(g_frames % 64) * 0.6180339f, g_volHvalid ? g_volTaa : 0.0f, 0, 0 };
+          IDirect3DDevice9_SetPixelShaderConstantF(dev, 39, vj, 1); }
         fs_quad(dev, (IDirect3DBaseTexture9 *)g_depTex, g_psvol, (float)(BG_W / 2), (float)(BG_H / 2), (float)BG_W, (float)BG_H);
+        /* temporal accumulation: the jittered march converges over a few frames instead of popping as the camera moves */
+        if (g_volTaa > 0 && g_psvolt) {
+            int k;
+            for (k = 0; k < 2; k++) if (!g_volH[k] && SUCCEEDED(IDirect3DDevice9_CreateTexture(dev, BG_W / 2, BG_H / 2, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &g_volH[k], NULL)))
+                IDirect3DTexture9_GetSurfaceLevel(g_volH[k], 0, &g_volHS[k]);
+            if (g_volHS[0] && g_volHS[1]) {
+                int cur = g_volHi ^ 1;
+                IDirect3DDevice9_SetRenderTarget(dev, 0, g_volHS[cur]);
+                IDirect3DDevice9_SetTexture(dev, 1, (IDirect3DBaseTexture9 *)g_volH[g_volHi]);
+                IDirect3DDevice9_SetSamplerState(dev, 1, D3DSAMP_MINFILTER, D3DTEXF_LINEAR); IDirect3DDevice9_SetSamplerState(dev, 1, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+                IDirect3DDevice9_SetSamplerState(dev, 1, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP); IDirect3DDevice9_SetSamplerState(dev, 1, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+                fs_quad(dev, (IDirect3DBaseTexture9 *)g_volT, g_psvolt, (float)(BG_W / 2), (float)(BG_H / 2), (float)(BG_W / 2), (float)(BG_H / 2));
+                IDirect3DDevice9_SetTexture(dev, 1, NULL);
+                g_volHi = cur; g_volHvalid = 1; outT = g_volH[cur];
+            }
+        } else g_volHvalid = 0;
         IDirect3DDevice9_SetRenderTarget(dev, 0, rt); if (rt) IDirect3DSurface9_Release(rt);
         IDirect3DDevice9_SetRenderState(dev, D3DRS_ALPHABLENDENABLE, TRUE);
-        fs_quad(dev, (IDirect3DBaseTexture9 *)g_volT, g_psvolc, (float)BG_W, (float)BG_H, (float)(BG_W / 2), (float)(BG_H / 2));
+        fs_quad(dev, (IDirect3DBaseTexture9 *)outT, g_psvolc, (float)BG_W, (float)BG_H, (float)(BG_W / 2), (float)(BG_H / 2));
     } else
     fs_quad(dev, (IDirect3DBaseTexture9 *)g_depTex, g_psvol, (float)BG_W, (float)BG_H, (float)BG_W, (float)BG_H);
     IDirect3DDevice9_SetSamplerState(dev, 0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
@@ -1491,6 +1514,7 @@ static void read_ctl(void)
         else if (sscanf(line, "halo %f", &a) == 1) g_halo = a;
         else if (sscanf(line, "volsteps %f", &a) == 1) g_volSteps = (int)a;
         else if (sscanf(line, "volhalf %f", &a) == 1) g_volHalf = (int)a;
+        else if (sscanf(line, "voltaa %f", &a) == 1) g_volTaa = a;
         else if (sscanf(line, "volbar %f", &a) == 1) g_volBar = a;
         else if (sscanf(line, "voltime %f", &a) == 1) g_volTime = a;
         else if (sscanf(line, "volfade %f", &a) == 1) g_volFade = a;
@@ -2512,7 +2536,7 @@ static void free_gpu(void)
     for (int k = 0; k < 2; k++) { REL(g_blS[k]); REL(g_blT[k]); }
     for (int i = 0; i < g_nparts; i++) { REL(g_parts[i].vb); REL(g_parts[i].ib); REL(g_parts[i].tex); }
     g_nparts = 0;
-    REL(g_fvb); REL(g_fib); REL(g_ftex); REL(g_recS1); REL(g_recS2); REL(g_volS); REL(g_volT); REL(g_psvolc);
+    REL(g_fvb); REL(g_fib); REL(g_ftex); REL(g_recS1); REL(g_recS2); REL(g_volS); REL(g_volT); REL(g_psvolc); REL(g_psvolt); REL(g_volHS[0]); REL(g_volHS[1]); REL(g_volH[0]); REL(g_volH[1]); g_volHvalid = 0;
 #undef REL
 }
 

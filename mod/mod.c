@@ -570,7 +570,12 @@ static void col_camera(const float *pivot, float *cam, const float *right)
         t = col_ray(o, d); if (t < best) best = t;
     }
     want = best * tot - g_camRad; if (want < 10) want = 10; if (want > len) want = len;
-    if (g_colDist < 0 || want < g_colDist) g_colDist = want; else g_colDist += (want - g_colDist) * g_camOut;
+    /* a hit must last 2 frames before the camera jumps in: at a fixed-camera cut the player/anchor can be off for one frame,
+       which made the camera snap forward and then ease back */
+    { static int hitN; static float pend;
+      if (g_colDist < 0) g_colDist = want;
+      else if (want < g_colDist - 1.0f) { if (++hitN >= 2 || want < pend - 1.0f && hitN > 1) g_colDist = want; pend = want; }
+      else { hitN = 0; g_colDist += (want - g_colDist) * g_camOut; } }
     for (k = 0; k < 3; k++) cam[k] = pivot[k] + (cam[k] - pivot[k]) * (g_colDist / len);
 }
 static int load_mesh2(IDirect3DDevice9 *dev, const char *dir, const char *name)

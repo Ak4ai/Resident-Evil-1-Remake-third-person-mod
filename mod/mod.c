@@ -195,7 +195,7 @@ static int g_hideFx = 1; /* ctl: hidefx 0/1 */
    ctl: eventcam 0 disables this. */
 #define EV_VT 0x00C963C8u
 #define EV_STRIDE 0x6D0
-static int g_eventCam = 1, g_inEvent, g_evSaveOn = -1, g_evCount;
+static int g_eventCam = 1, g_inEvent, g_evSaveOn = -1, g_evCount; static int g_evDelay = 3;
 static char *g_evBase; static char *g_evScan = (char *)0x10000; static int g_evQuiet;
 
 static int g_wepLog; /* ctl: weplog 1 = log meshes drawn while LT is held */
@@ -1401,6 +1401,7 @@ static void read_ctl(void)
         else if (sscanf(line, "bloomlim %f", &a) == 1) g_bloomTh = a;
         else if (sscanf(line, "hidefx %f", &a) == 1) g_hideFx = (int)a;
         else if (sscanf(line, "eventcam %f", &a) == 1) g_eventCam = (int)a;
+        else if (sscanf(line, "eventdelay %f", &a) == 1) g_evDelay = (int)a;
         else if (sscanf(line, "weplog %f", &a) == 1) g_wepLog = (int)a;
         else if (sscanf(line, "knifeoff %f", &a) == 1) g_knifeOff = (int)a;
         else if (sscanf(line, "bloom %f", &a) == 1) g_bloomStr = a;
@@ -2247,43 +2248,43 @@ HOOKFN(HRESULT, DrawIndexedPrimitive, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT 
     return o_DrawIndexedPrimitive(d, t, bv, mv, nv, si, pc);
 }
 
-static int ev_valid(void)
-{
-    MEMORY_BASIC_INFORMATION mbi;
-    if (!g_evBase || !VirtualQuery(g_evBase, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return 0;
-    if ((char *)mbi.BaseAddress + mbi.RegionSize < g_evBase + (size_t)g_evCount * EV_STRIDE) return 0;
-    return *(DWORD *)g_evBase == EV_VT;
-}
-/* incremental search: a few regions per call so it never stalls a frame */
+static char *g_evSlot[256]; static int g_evN, g_evDone; static int g_evFound;
+/* the slots live in several separate blocks: collect EVERY object with the event-task vtable over one full pass of the
+   address space (a few regions per call, no frame stall); a pass that finds none is retried */
 static void ev_scan_step(void)
 {
     MEMORY_BASIC_INFORMATION mbi; int k;
     for (k = 0; k < 24; k++) {
-        if (g_evScan >= (char *)0x7FFE0000 || !VirtualQuery(g_evScan, &mbi, sizeof mbi)) { g_evScan = (char *)0x10000; return; }
-        if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE && mbi.Protect == PAGE_READWRITE && mbi.RegionSize >= 3 * EV_STRIDE) {
-            char *b = (char *)mbi.BaseAddress, *e = b + mbi.RegionSize - 2 * EV_STRIDE, *q;
-            for (q = b; q < e; q += 4)
-                if (*(DWORD *)q == EV_VT && *(DWORD *)(q + EV_STRIDE) == EV_VT && *(DWORD *)(q + 2 * EV_STRIDE) == EV_VT) {
-                    int n = 0; while (q + (size_t)(n + 1) * EV_STRIDE <= b + mbi.RegionSize && *(DWORD *)(q + (size_t)n * EV_STRIDE) == EV_VT && n < 512) n++;
-                    g_evBase = q; g_evCount = n; g_evScan = (char *)0x10000;
-                    M_("EVENT slots %p n=%d" "\n", (void *)q, n);
-                    return;
-                }
+        if (g_evScan >= (char *)0x7FFE0000 || !VirtualQuery(g_evScan, &mbi, sizeof mbi)) {
+            g_evScan = (char *)0x10000;
+            if (g_evFound) { g_evN = g_evFound; g_evDone = 1; M_("EVENT slots encontrados: %d" "\n", g_evN); }
+            g_evFound = 0; return;
+        }
+        if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE && mbi.Protect == PAGE_READWRITE && mbi.RegionSize >= EV_STRIDE) {
+            char *b = (char *)mbi.BaseAddress, *e = b + mbi.RegionSize - EV_STRIDE, *q;
+            for (q = b; q <= e; q += 4)
+                if (*(DWORD *)q == EV_VT && g_evFound < 256) { g_evSlot[g_evFound++] = q; q += EV_STRIDE - 4; }
         }
         g_evScan = (char *)mbi.BaseAddress + mbi.RegionSize;
     }
+}
+static int ev_slot_ok(char *sl)
+{
+    MEMORY_BASIC_INFORMATION mbi;
+    return VirtualQuery(sl, &mbi, sizeof mbi) && mbi.State == MEM_COMMIT && mbi.Protect == PAGE_READWRITE &&
+           sl + EV_STRIDE <= (char *)mbi.BaseAddress + mbi.RegionSize && *(DWORD *)sl == EV_VT;
 }
 static void ev_update(void)
 {
     int i, ev = 0;
     if (!g_eventCam) { if (g_inEvent) { g_inEvent = 0; if (g_evSaveOn >= 0) g_on = g_evSaveOn; g_evSaveOn = -1; } return; }
-    if (!ev_valid()) { g_evBase = NULL; ev_scan_step(); return; }
-    for (i = 0; i < g_evCount; i++) {
-        char *sl = g_evBase + (size_t)i * EV_STRIDE;
-        if (*(DWORD *)sl != EV_VT) continue;
+    if (!g_evDone) { ev_scan_step(); return; }
+    for (i = 0; i < g_evN; i++) {
+        char *sl = g_evSlot[i];
+        if (!ev_slot_ok(sl)) { g_evDone = 0; g_evN = 0; M_("EVENT slots invalidos, procurando de novo" "\n"); return; }
         if (sl[0x160] && *(DWORD *)(sl + 0x1C) == 2) { ev = 1; break; }
     }
-    if (ev) g_evQuiet = 0; else if (g_inEvent && ++g_evQuiet < 20) ev = 1;   /* ~0.3 s of debounce before handing the camera back */
+    if (ev) g_evQuiet = 0; else if (g_inEvent && ++g_evQuiet < g_evDelay) ev = 1;   /* debounce in updates (1 update = 2 frames); ctl eventdelay */
     if (ev && !g_inEvent) { g_inEvent = 1; g_evSaveOn = g_on; g_on = 0; M_("EVENT inicio f=%d -> camera fixa do jogo" "\n", g_frames); }
     else if (!ev && g_inEvent) { g_inEvent = 0; if (g_evSaveOn >= 0) g_on = g_evSaveOn; g_evSaveOn = -1; M_("EVENT fim f=%d -> camera livre" "\n", g_frames); }
 }

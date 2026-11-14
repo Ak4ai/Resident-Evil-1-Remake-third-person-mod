@@ -207,6 +207,7 @@ static float g_pre1[6] = { -75.8f, 208.8f, 46.7f, 2.54f, -0.16f, 55.0f }; /* ctl
 static int g_shots, g_swId, g_shotK;
 static float g_vol = 1.0f, g_volDir[3] = { -0.22f, -0.62f, -1.0f }, g_volCol[3] = { 0.50f, 0.62f, 0.85f }; static int g_volSteps = 48; static float g_volFade = 220.0f, g_volSoft = 18.0f; /* ctl volfade, volsoft (cm) */ /* ctl vol, voldir, volcol, volsteps */
 static IDirect3DPixelShader9 *g_psvolc; static IDirect3DTexture9 *g_volT; static IDirect3DSurface9 *g_volS; static int g_volHalf = 1; /* ctl volhalf 0 = old full-res shafts */
+static float g_volBar = 14.0f; /* softness (cm) of the window-bar shadows inside the shafts; 3 was razor thin and shimmered as the camera moved (ctl volbar) */
 static IDirect3DPixelShader9 *g_psvol, *g_psgrain; static IDirect3DTexture9 *g_postT; static IDirect3DSurface9 *g_postS;
 static float g_thExpo = 1.2f;
 static int g_thArm, g_thLater;
@@ -833,7 +834,7 @@ static int inv4(const float *m, float *o)
 /* moonlight shafts (see psvol): reads g_depTex, adds into the current target (g_colSurf), RGB only */
 static void do_volumetric(IDirect3DDevice9 *dev)
 {
-    float ivp[16], cam[4] = { g_pos[0], g_pos[1], g_pos[2], 1 }, ld[4], win[4] = { -525.0f, 8.0f, 540.0f, 68.0f }, win2[4] = { 382.0f, 92.0f, 205.0f, 3.0f };
+    float ivp[16], cam[4] = { g_pos[0], g_pos[1], g_pos[2], 1 }, ld[4], win[4] = { -525.0f, 8.0f, 540.0f, 68.0f }, win2[4] = { 382.0f, 92.0f, 205.0f, g_volBar };
     float wf = g_flash > 1 ? 1 : g_flash, col[4] = { g_volCol[0] + (0.85f - g_volCol[0]) * wf, g_volCol[1] + (0.88f - g_volCol[1]) * wf, g_volCol[2] + (0.95f - g_volCol[2]) * wf, 1800.0f }, vt[4] = { GetTickCount() * 0.001f, (float)(g_volSteps < 4 ? 4 : g_volSteps > 64 ? 64 : g_volSteps), g_volFade < 10 ? 10 : g_volFade, g_volSoft < 1 ? 1 : g_volSoft };
     float n = sqrtf(g_volDir[0] * g_volDir[0] + g_volDir[1] * g_volDir[1] + g_volDir[2] * g_volDir[2]);
     if (g_vol <= 0 || !g_psvol || !g_vsq || !g_declq || n < 1e-6f || !inv4(g_M, ivp)) return;
@@ -1487,6 +1488,7 @@ static void read_ctl(void)
         else if (sscanf(line, "halo %f", &a) == 1) g_halo = a;
         else if (sscanf(line, "volsteps %f", &a) == 1) g_volSteps = (int)a;
         else if (sscanf(line, "volhalf %f", &a) == 1) g_volHalf = (int)a;
+        else if (sscanf(line, "volbar %f", &a) == 1) g_volBar = a;
         else if (sscanf(line, "volfade %f", &a) == 1) g_volFade = a;
         else if (sscanf(line, "volsoft %f", &a) == 1) g_volSoft = a;
         else if (sscanf(line, "voldir %f %f %f", &a, &b, &c) == 3) { g_volDir[0] = a; g_volDir[1] = b; g_volDir[2] = c; }
